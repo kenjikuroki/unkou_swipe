@@ -46,6 +46,8 @@
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>GADApplicationIdentifier</key>
-	<string>ca-app-pub-3331079517737737~9472090866</string>
+	<string>ca-app-pub-3331079517737737~7954268711</string>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>適切に広告を表示するために、次の画面で「許可」を選択してください。</string>
 </dict>
 </plist>
