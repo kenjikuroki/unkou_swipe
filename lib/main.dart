@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'widgets/ad_banner.dart';
 import 'utils/ad_manager.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 
 Future<void> main() async {
@@ -410,19 +411,16 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   const SizedBox(height: 40),
+
+                  // Sister App Link
+                  const _SisterAppButton(),
+                  const SizedBox(height: 40),
                 ],
               ),
             ),
           ),
           
-          // Ad Banner
-          const SafeArea(
-            top: false,
-            child: SizedBox(
-              height: 60,
-              child: AdBanner(adKey: 'home', keepAlive: true),
-            ),
-          ),
+          // Ad Banner removed
         ],
       ),
     );
@@ -490,6 +488,106 @@ class _MenuButton extends StatelessWidget {
                   ),
                 ),
                 Icon(Icons.chevron_right, color: Colors.grey[400]),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+}
+
+class _SisterAppButton extends StatelessWidget {
+  const _SisterAppButton();
+
+  Future<void> _launchURL(BuildContext context) async {
+    final Uri url = Uri.parse('https://apps.apple.com/app/id6757862966');
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text("姉妹アプリへ移動"),
+          content: const Text("App Storeを開いて姉妹アプリを表示しますか？"),
+          actions: [
+            TextButton(
+              child: const Text("キャンセル"),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            TextButton(
+              child: const Text("移動する", style: TextStyle(fontWeight: FontWeight.bold)),
+              onPressed: () async {
+                Navigator.of(context).pop();
+                if (!await launchUrl(url)) {
+                  debugPrint('Could not launch $url');
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => _launchURL(context),
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.asset(
+                    'assets/sister_app_icon.jpg',
+                    width: 60,
+                    height: 60,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "４択問題アプリリリース！",
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        "空き時間にサクサク解ける\n姉妹アプリはこちら",
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.open_in_new, color: Colors.grey[400]),
               ],
             ),
           ),
@@ -727,7 +825,7 @@ class _QuizPageState extends State<QuizPage> {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.only(bottom: 40, top: 20),
+                padding: const EdgeInsets.only(bottom: 20, top: 20),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -765,6 +863,12 @@ class _QuizPageState extends State<QuizPage> {
                     ),
                   ],
                 ),
+              ),
+              // Ad Banner
+              const SizedBox(
+                width: double.infinity,
+                height: 60,
+                child: AdBanner(adKey: 'quiz_footer'),
               ),
             ],
           ),
