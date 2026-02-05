@@ -10,7 +10,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'widgets/ad_banner.dart';
 import 'utils/ad_manager.dart';
+import 'utils/purchase_manager.dart';
+import 'widgets/premium_card.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:auto_size_text/auto_size_text.dart';
+import 'widgets/special_offer_dialog.dart';
 
 
 Future<void> main() async {
@@ -127,6 +131,29 @@ class PrefsHelper {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getStringList(_keyWeakQuestions) ?? [];
   }
+
+  static const String _keySpecialOfferShown = 'special_offer_shown_v1';
+  
+  static Future<bool> shouldShowSpecialOffer() async {
+     final prefs = await SharedPreferences.getInstance();
+     bool shown = prefs.getBool(_keySpecialOfferShown) ?? false;
+     bool isPremium = prefs.getBool('is_premium_user') ?? false;
+     
+     // プレミアム未加入 かつ 未表示 の場合のみ
+     if (isPremium || shown) return false;
+
+     // 2026年3月1日以降は表示しない
+     final now = DateTime.now();
+     final limit = DateTime(2026, 3, 1);
+     if (now.isAfter(limit)) return false;
+
+     return true;
+  }
+  
+  static Future<void> markSpecialOfferShown() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keySpecialOfferShown, true);
+  }
 }
 
 class QuizData {
@@ -224,6 +251,7 @@ class _HomePageState extends State<HomePage> {
     
     // 4. Preload Ads
     AdManager.instance.preloadAd('home');
+    await PurchaseManager.instance.initialize();
 
     await QuizData.load();
     await _loadUserData();
@@ -412,8 +440,35 @@ class _HomePageState extends State<HomePage> {
                   ),
                   const SizedBox(height: 40),
 
+                  // Premium Unlock
+                  const PremiumUnlockCard(),
+                  
+                  // Restore Purchase
+                  Align(
+                    alignment: Alignment.center,
+                    child: TextButton(
+                      onPressed: () async {
+                        await PurchaseManager.instance.restorePurchases();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text("購入の復元を試みました")),
+                        );
+                      },
+                      child: const Text(
+                        "購入を復元する",
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
                   // Sister App Link
-                  const _SisterAppButton(),
+                  ValueListenableBuilder<bool>(
+                    valueListenable: PurchaseManager.instance.isPremium,
+                    builder: (context, isPremium, child) {
+                      if (isPremium) return const SizedBox.shrink();
+                      return const _SisterAppButton();
+                    },
+                  ),
                   const SizedBox(height: 40),
                 ],
               ),
@@ -727,7 +782,20 @@ class _QuizPageState extends State<QuizPage> {
       
       if (shouldShow) {
         AdManager.instance.showInterstitial(
-          onComplete: () {
+          onComplete: () async {
+            if (!mounted) return;
+            
+            // 特別オファーチェック
+            final shouldOffer = await PrefsHelper.shouldShowSpecialOffer();
+            if (shouldOffer && mounted) {
+              await PrefsHelper.markSpecialOfferShown();
+              
+               await showDialog(
+                 context: context,
+                 builder: (context) => const SpecialOfferDialog(),
+               );
+            }
+            
             if (mounted) {
               _navigateToResult();
             }
@@ -919,49 +987,49 @@ class _QuizPageState extends State<QuizPage> {
                 ),
               ),
             )
+          /*
           else 
-            const Spacer(flex: 2),
+            const Spacer(flex: 2)
+          */,
 
           Expanded(
-            flex: 5,
+            flex: hasImage ? 5 : 1,
             child: Padding(
               padding: const EdgeInsets.all(24.0),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  return FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: SizedBox(
-                      width: constraints.maxWidth,
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                           if (!hasImage)
-                            const Text(
-                              "Q.",
-                              style: TextStyle(
-                                fontSize: 40,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blueGrey,
-                              ),
-                            ),
-                          if (!hasImage) const SizedBox(height: 20),
-
-                          Text(
-                            quiz.question,
-                            style: TextStyle(
-                              fontSize: hasImage ? 20 : 24,
-                              fontWeight: FontWeight.bold,
-                              height: 1.3,
-                              color: Colors.black87,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                    // Q. ラベル
+                    const Text(
+                      "Q.",
+                      style: TextStyle(
+                        fontSize: 40,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blueGrey,
                       ),
+                      textAlign: TextAlign.center,
                     ),
-                  );
-                },
+                  const SizedBox(height: 20),
+
+                  // 問題文
+                  Expanded(
+                    child: AutoSizeText(
+                      quiz.question,
+                      style: TextStyle(
+                        fontSize: hasImage ? 24 : 32,
+                        fontWeight: FontWeight.bold,
+                        height: 1.3,
+                        color: Colors.black87,
+                      ),
+                      textAlign: TextAlign.left,
+                      minFontSize: 12,
+                      stepGranularity: 1,
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 20,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

@@ -24,7 +24,16 @@ class AdManager {
   // Test ID for debug (optional use)
   // final String _testAdUnitId = 'ca-app-pub-3940256099942544/6300978111';
 
+  bool _isPremium = false;
+
+  void disableAds() {
+    _isPremium = true;
+    disposeAll();
+    debugPrint('AdManager: Ads disabled for premium user.');
+  }
+
   void preloadAd(String key) {
+    if (_isPremium) return;
     if (_ads.containsKey(key)) {
       // Already preloading or loaded
       return;
@@ -64,6 +73,7 @@ class AdManager {
   /// Returns the ad and removes it from manager (transfer ownership)
   /// If [keep] is true, it retains in manager (shared ownership/singleton usage like Home).
   PreloadedAd? consumeAd(String key, {bool keep = false}) {
+    if (_isPremium) return null;
     if (keep) {
       return _ads[key];
     }
@@ -77,6 +87,7 @@ class AdManager {
   final String _interstitialAdUnitId = 'ca-app-pub-3331079517737737/7208163254';
 
   void preloadInterstitial() {
+    if (_isPremium) return;
     // If already loaded or loading, skip? 
     // Simplified: just try to load if null.
     if (_interstitialAd != null) return;
@@ -100,6 +111,10 @@ class AdManager {
   /// Shows the interstitial ad if available.
   /// [onComplete] is called when the ad is dismissed or if it fails to show/load.
   void showInterstitial({required VoidCallback onComplete}) {
+    if (_isPremium) {
+      onComplete();
+      return;
+    }
     if (_interstitialAd == null) {
       debugPrint('AdManager: No interstitial ready, skipping.');
       onComplete();
