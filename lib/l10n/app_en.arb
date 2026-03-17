@@ -1,0 +1,38 @@
+{
+  "@@locale": "en",
+  "appTitle": "Cargo Manager",
+  "@appTitle": {},
+  "shuffleMode": "Shuffle",
+  "sequentialMode": "Lists",
+  "premiumUpgrade": "Premium Upgrade",
+  "sequentialModeUnlock": "Unlock List Mode",
+  "sequentialModeUnlockDesc": "You can solve all questions in order from the first one.",
+  "removeAds": "Completely Hide Ads",
+  "removeAdsDesc": "Hides all ads (banners, videos, etc.) in the app.",
+  "buyNow": "Buy Now",
+  "featureSequentialTitle": "Unlock Sequential Mode",
+  "featureSequentialDesc": "You can solve all questions in order from the first one.",
+  "featureNoAdsTitle": "Completely Hide Ads",
+  "featureNoAdsDesc": "Hides all ads in the app.",
+  "purchase": "Purchase",
+  "cancel": "Cancel",
+  "selectCategory": "Select Category",
+  "questionCount": "{count} questions",
+  "@questionCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "restorePurchase": "Restore Purchase",
+  "failedToLoadData": "No quiz data available yet",
+  "weaknessReview": "Review Weakness ({count} questions)",
+  "@weaknessReview": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  }
+}

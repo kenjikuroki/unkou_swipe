@@ -1,4 +1,4 @@
-
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../utils/ad_manager.dart';
@@ -24,13 +24,26 @@ class _AdBannerState extends State<AdBanner> {
   BannerAd? _bannerAd;
   bool _isLoaded = false;
   ValueNotifier<bool>? _loadingNotifier; // To track listener for cleanup
+  bool _showPromotion = false;
   
-  final String _adUnitId = 'ca-app-pub-3331079517737737/7128272208';
+  String get _adUnitId => AdManager.instance.adUnitId;
   
   @override
   void initState() {
     super.initState();
-    _initAd();
+    // Check if already premium
+    final isPremium = PurchaseManager.instance.isPremium.value;
+    if (isPremium) {
+      _showPromotion = false;
+      return;
+    }
+
+    // 10% probability to show premium promotion
+    _showPromotion = Random().nextDouble() < 0.1;
+    
+    if (!_showPromotion) {
+      _initAd();
+    }
   }
 
   void _initAd() {
@@ -96,8 +109,10 @@ class _AdBannerState extends State<AdBanner> {
     return ValueListenableBuilder<bool>(
       valueListenable: PurchaseManager.instance.isPremium,
       builder: (context, isPremium, child) {
-        if (isPremium) {
-          return const SizedBox.shrink();
+        if (isPremium) return const SizedBox.shrink();
+
+        if (_showPromotion) {
+          return _buildPromotion();
         }
         
         if (_isLoaded && _bannerAd != null) {
@@ -108,6 +123,65 @@ class _AdBannerState extends State<AdBanner> {
           );
         }
         return const BannerAdPlaceholder();
+      },
+    );
+  }
+
+  Widget _buildPromotion() {
+    return ValueListenableBuilder<bool>(
+      valueListenable: PurchaseManager.instance.isPurchasing,
+      builder: (context, isPurchasing, child) {
+        return InkWell(
+          onTap: isPurchasing ? null : () async {
+            try {
+              await PurchaseManager.instance.buyPremium();
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error: $e')),
+                );
+              }
+            }
+          },
+          child: Container(
+            width: double.infinity,
+            height: 60,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFFFFD700), Color(0xFFFF8C00)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (isPurchasing)
+                  const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                else
+                  const Icon(Icons.star, color: Colors.white, size: 24),
+                const SizedBox(width: 8),
+                const Text(
+                  "プレミアムプランで広告を完全非表示に！",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (!isPurchasing) const Icon(Icons.chevron_right, color: Colors.white, size: 24),
+              ],
+            ),
+          ),
+        );
       },
     );
   }

@@ -1,0 +1,54 @@
+{
+  "@@locale": "ja",
+  "appTitle": "運行管理者 貨物",
+  "quizSubtitle": "スキマ時間でサクサク合格！一問一答形式",
+  "modeShuffle": "シャッフル",
+  "modeSequential": "順番通り",
+  "lockModeSequential": "このモードはロックされています",
+  "premiumUpgrade": "プレミアムアップグレード",
+  "featureSequentialTitle": "「連続」モードの解放",
+  "featureSequentialDesc": "1問目から順番にすべての問題を解くことができます。",
+  "featureNoAdsTitle": "広告を完全に非表示",
+  "featureNoAdsDesc": "アプリ内のあらゆる広告を非表示にします。",
+  "purchase": "購入する",
+  "cancel": "キャンセル",
+  "reviewWeakness": "苦手を復習する ({count}問)",
+  "@reviewWeakness": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "selectCategory": "カテゴリーを選択",
+  "noData": "問題データがまだありません",
+  "back": "元に戻す",
+  "questionNumber": "第{index}問",
+  "@questionNumber": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      }
+    }
+  },
+  "questionsCount": "{count}問",
+  "@questionsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "part1": "一般知識",
+  "part2": "安全・機材",
+  "part3": "清掃方法",
+  "part4": "建物管理",
+  "premiumCardTitle": "プレミアムプランに\nアップグレード",
+  "premiumCardSubtitle": "広告を非表示にして集中！",
+  "restorePurchase": "購入を復元する",
+  "sisterAppPromoTitle": "別の資格にもチャレンジ！",
+  "sisterAppPromoSubtitle": "別の資格にもチャレンジ！\n詳細はこちらから",
+  "sisterAppDialogTitle": "別の資格にもチャレンジ！",
+  "sisterAppDialogBody": "App Storeを開いて、\n姉妹アプリのページに移動します。",
+  "open": "開く"
+}

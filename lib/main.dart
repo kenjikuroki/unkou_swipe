@@ -3,18 +3,28 @@ import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:app_tracking_transparency/app_tracking_transparency.dart';
 
-import 'package:in_app_review/in_app_review.dart';
-
 import 'package:appinio_swiper/appinio_swiper.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:auto_size_text/auto_size_text.dart';
 import 'dart:convert';
 import 'widgets/ad_banner.dart';
 import 'utils/ad_manager.dart';
 import 'utils/purchase_manager.dart';
-import 'widgets/premium_card.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:auto_size_text/auto_size_text.dart';
+import 'widgets/premium_unlock_card.dart';
 import 'widgets/special_offer_dialog.dart';
+import 'utils/prefs_helper.dart';
+import 'utils/migration_helper.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'l10n/app_localizations.dart';
+
+import 'widgets/mode_toggle.dart';
+import 'widgets/premium_upgrade_dialog.dart';
+import 'widgets/category_review_modal.dart';
+import 'widgets/tutorial_overlay.dart';
+import 'models/app_data.dart';
+import 'utils/api_service.dart';
+import 'utils/responsive_helper.dart';
+import 'package:in_app_review/in_app_review.dart';
 
 
 Future<void> main() async {
@@ -24,6 +34,9 @@ Future<void> main() async {
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
   ]);
+
+  // Initialize Purchase Manager
+  await PurchaseManager.instance.initialize();
   
   runApp(const MyApp());
 }
@@ -32,167 +45,9 @@ Future<void> main() async {
 // 1. Data Models & Helpers
 // -----------------------------------------------------------------------------
 
-class Quiz {
-  final String question;
-  final bool isCorrect;
-  final String explanation;
-  final String? imagePath;
+// Data Models & Helpers are now in lib/models/app_data.dart
+// QuizData is replaced by ApiService and dynamic AppData in _MyHomePageState
 
-  Quiz({
-    required this.question,
-    required this.isCorrect,
-    required this.explanation,
-    this.imagePath,
-  });
-
-  factory Quiz.fromJson(Map<String, dynamic> json) {
-    return Quiz(
-      question: (json['question'] as String).replaceAll('\n', ''),
-      isCorrect: json['isCorrect'] as bool,
-      explanation: json['explanation'] as String,
-      imagePath: json['imagePath'] as String?,
-    );
-  }
-}
-
-class PrefsHelper {
-  static const String _keyWeakQuestions = 'weak_questions';
-  static const String _keyAdCounter = 'ad_counter';
-
-  static Future<bool> shouldShowInterstitial() async {
-    final prefs = await SharedPreferences.getInstance();
-    int current = prefs.getInt(_keyAdCounter) ?? 0;
-    current++;
-    await prefs.setInt(_keyAdCounter, current);
-    return (current % 3 == 0);
-  }
-
-  static const String _keyCompleteQuizCount = 'complete_quiz_count';
-
-  static Future<bool> shouldRequestReview() async {
-    final prefs = await SharedPreferences.getInstance();
-    int current = prefs.getInt(_keyCompleteQuizCount) ?? 0;
-    current++;
-    await prefs.setInt(_keyCompleteQuizCount, current);
-    
-    // 2回目の完了時のみレビュー依頼を表示
-    return (current == 2);
-  }
-  
-  static Future<void> saveHighScore(String categoryKey, int score) async {
-    final prefs = await SharedPreferences.getInstance();
-    final currentHigh = prefs.getInt(categoryKey) ?? 0;
-    if (score > currentHigh) {
-      await prefs.setInt(categoryKey, score);
-    }
-  }
-
-  static Future<int> getHighScore(String categoryKey) async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(categoryKey) ?? 0;
-  }
-
-  static Future<void> addWeakQuestions(List<String> questions) async {
-    if (questions.isEmpty) return;
-    final prefs = await SharedPreferences.getInstance();
-    final List<String> current = prefs.getStringList(_keyWeakQuestions) ?? [];
-    
-    bool changed = false;
-    for (final q in questions) {
-      if (!current.contains(q)) {
-        current.add(q);
-        changed = true;
-      }
-    }
-    
-    if (changed) {
-      await prefs.setStringList(_keyWeakQuestions, current);
-    }
-  }
-
-  static Future<void> removeWeakQuestions(List<String> questions) async {
-    if (questions.isEmpty) return;
-    final prefs = await SharedPreferences.getInstance();
-    final List<String> current = prefs.getStringList(_keyWeakQuestions) ?? [];
-    
-    bool changed = false;
-    for (final q in questions) {
-       if (current.remove(q)) {
-         changed = true;
-       }
-    }
-    
-    if (changed) {
-      await prefs.setStringList(_keyWeakQuestions, current);
-    }
-  }
-
-  static Future<List<String>> getWeakQuestions() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getStringList(_keyWeakQuestions) ?? [];
-  }
-
-  static const String _keySpecialOfferShown = 'special_offer_shown_v1';
-  
-  static Future<bool> shouldShowSpecialOffer() async {
-     final prefs = await SharedPreferences.getInstance();
-     bool shown = prefs.getBool(_keySpecialOfferShown) ?? false;
-     bool isPremium = prefs.getBool('is_premium_user') ?? false;
-     
-     // プレミアム未加入 かつ 未表示 の場合のみ
-     if (isPremium || shown) return false;
-
-     // 2026年3月1日以降は表示しない
-     final now = DateTime.now();
-     final limit = DateTime(2026, 3, 1);
-     if (now.isAfter(limit)) return false;
-
-     return true;
-  }
-  
-  static Future<void> markSpecialOfferShown() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_keySpecialOfferShown, true);
-  }
-}
-
-class QuizData {
-  static Map<String, List<Quiz>> _data = {};
-
-  static Future<void> load() async {
-    try {
-      final String jsonString = await rootBundle.loadString('assets/quiz_data.json');
-      final Map<String, dynamic> jsonData = json.decode(jsonString);
-
-      _data = {};
-      jsonData.forEach((key, value) {
-        if (value is List) {
-          _data[key] = value.map((q) => Quiz.fromJson(q)).toList();
-        }
-      });
-    } catch (e) {
-      debugPrint("Error loading quiz data: $e");
-      _data = {};
-    }
-  }
-
-  static List<Quiz> get part1 => _data['part1'] ?? [];
-  static List<Quiz> get part2 => _data['part2'] ?? [];
-  static List<Quiz> get part3 => _data['part3'] ?? [];
-  static List<Quiz> get part4 => _data['part4'] ?? [];
-  static List<Quiz> get part5 => _data['part5'] ?? [];
-
-  static List<Quiz> getQuizzesFromTexts(List<String> texts) {
-    final allQuizzes = [
-      ...part1,
-      ...part2,
-      ...part3,
-      ...part4,
-      ...part5,
-    ];
-    return allQuizzes.where((q) => texts.contains(q.question)).toList();
-  }
-}
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -200,16 +55,35 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '運行管理者 貨物',
+      title: '浄化槽管理士対策',
       debugShowCheckedModeBanner: false,
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('ja', ''),
+      ],
+      locale: const Locale('ja', ''),
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueAccent),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF0F172A),
+          primary: const Color(0xFF1E293B),
+        ),
         useMaterial3: true,
-        scaffoldBackgroundColor: const Color(0xFFF5F5F7),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.blueAccent,
+        scaffoldBackgroundColor: const Color(0xFFF1F5F9),
+        appBarTheme: AppBarTheme(
+          backgroundColor: const Color(0xFF1E293B),
           foregroundColor: Colors.white,
           elevation: 0,
+          centerTitle: true,
+          titleTextStyle: TextStyle(
+            fontSize: ResponsiveHelper.respFontSize(context, 20),
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.2,
+          ),
         ),
       ),
       home: const HomePage(),
@@ -231,6 +105,9 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   int _weaknessCount = 0;
   bool _isLoading = true;
+  bool _isSequentialMode = false;
+  Map<String, int> _categoryWeaknessCounts = {};
+  AppData? _appData;
 
   @override
   void initState() {
@@ -242,6 +119,9 @@ class _HomePageState extends State<HomePage> {
     // 1. Wait for 1 second
     await Future.delayed(const Duration(seconds: 1));
 
+    // Data Migration from V1 (local) to V2 (GAS)
+    await MigrationHelper.performMigration();
+
     // 2. Request ATT
     final status = await AppTrackingTransparency.requestTrackingAuthorization();
     debugPrint("ATT Status: $status");
@@ -251,9 +131,20 @@ class _HomePageState extends State<HomePage> {
     
     // 4. Preload Ads
     AdManager.instance.preloadAd('home');
-    await PurchaseManager.instance.initialize();
 
-    await QuizData.load();
+    // Load dynamic data from GAS
+    final apiService = ApiService();
+    _appData = await apiService.loadAppData('unkou');
+
+
+    if (_appData != null) {
+      AdManager.instance.setAdUnitIds(
+        bannerId: _appData!.config.adBannerId,
+        interstitialId: _appData!.config.adInterstitialId,
+      );
+      // PurchaseManager.instance.setProductId(_appData!.config.premiumProductId);
+    }
+
     await _loadUserData();
     if (mounted) {
       setState(() {
@@ -264,26 +155,49 @@ class _HomePageState extends State<HomePage> {
   
   Future<void> _loadUserData() async {
     final weakList = await PrefsHelper.getWeakQuestions();
+    if (_appData == null) return;
+    
+    // Calculate counts for each category
+    final counts = <String, int>{};
+    
+    for (var entry in _appData!.questions.entries) {
+      final categoryKey = entry.key;
+      final questions = entry.value;
+      final categoryQuestionTexts = questions.map((q) => q.question).toSet();
+      
+      int count = 0;
+      for (var weakText in weakList) {
+        if (categoryQuestionTexts.contains(weakText)) {
+          count++;
+        }
+      }
+      counts[categoryKey] = count;
+    }
+
     if (mounted) {
       setState(() {
         _weaknessCount = weakList.length;
+        _categoryWeaknessCounts = counts;
       });
     }
   }
 
-  void _startQuiz(BuildContext context, List<Quiz> quizList, String categoryKey, {bool isRandom10 = true}) async {
+  void _startQuiz(BuildContext context, List<Quiz> quizList, String categoryKey) async {
     List<Quiz> questionsToUse = List<Quiz>.from(quizList);
     
-    if (isRandom10) {
+    if (!_isSequentialMode) {
+      // Shuffle Mode (10 questions)
       questionsToUse.shuffle();
       if (questionsToUse.length > 10) {
         questionsToUse = questionsToUse.take(10).toList();
       }
     } else {
-      questionsToUse.shuffle();
+      // Sequential Mode (All questions, no shuffle)
+      // They are already in order from the API data
     }
     
     AdManager.instance.preloadAd('result');
+    AdManager.instance.preloadAd('quiz');
     AdManager.instance.preloadInterstitial();
     
     await Navigator.of(context).push(
@@ -291,7 +205,7 @@ class _HomePageState extends State<HomePage> {
         builder: (context) => QuizPage(
           quizzes: questionsToUse,
           categoryKey: categoryKey,
-          totalQuestions: isRandom10 ? 10 : questionsToUse.length,
+          totalQuestions: questionsToUse.length,
         ),
       ),
     );
@@ -299,18 +213,46 @@ class _HomePageState extends State<HomePage> {
     _loadUserData();
   }
 
-  void _startWeaknessReview(BuildContext context) async {
-    final navigator = Navigator.of(context);
+  void _showPremiumDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => const PremiumUpgradeDialog(),
+    );
+  }
+
+  void _startWeaknessReview(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => CategoryReviewModal(
+        counts: _categoryWeaknessCounts,
+        categoryOrder: _appData!.categoryOrder,
+        onCategorySelected: (categoryKey) => _startWeaknessReviewByCategory(context, categoryKey),
+      ),
+    );
+  }
+
+  void _startWeaknessReviewByCategory(BuildContext context, String categoryKey) async {
     final weakTexts = await PrefsHelper.getWeakQuestions();
-    if (!mounted) return;
+    if (!mounted || _appData == null) return;
     if (weakTexts.isEmpty) return;
 
-    final weakQuizzes = QuizData.getQuizzesFromTexts(weakTexts);
+    final categoryQuizzes = _appData!.questions[categoryKey] ?? [];
+    if (categoryQuizzes.isEmpty) return;
+
+    final categoryQuestionsSet = categoryQuizzes.map((q) => q.question).toSet();
+    final weakQuizzes = _getQuizzesFromTexts(weakTexts)
+        .where((q) => categoryQuestionsSet.contains(q.question))
+        .toList();
     
+    if (weakQuizzes.isEmpty) return;
+
     AdManager.instance.preloadAd('result');
+    AdManager.instance.preloadAd('quiz');
     AdManager.instance.preloadInterstitial();
 
-    await navigator.push(
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => QuizPage(
           quizzes: weakQuizzes,
@@ -323,17 +265,18 @@ class _HomePageState extends State<HomePage> {
     _loadUserData();
   }
 
-  void _startQuizByCategory(BuildContext context, String partKey) {
-    List<Quiz> quizzes;
-    String highScoreKey;
-    switch(partKey) {
-      case 'part1': quizzes = QuizData.part1; highScoreKey = 'highscore_part1'; break;
-      case 'part2': quizzes = QuizData.part2; highScoreKey = 'highscore_part2'; break;
-      case 'part3': quizzes = QuizData.part3; highScoreKey = 'highscore_part3'; break;
-      case 'part4': quizzes = QuizData.part4; highScoreKey = 'highscore_part4'; break;
-      case 'part5': quizzes = QuizData.part5; highScoreKey = 'highscore_part5'; break;
-      default: quizzes = []; highScoreKey = '';
-    }
+  List<Quiz> _getQuizzesFromTexts(List<String> texts) {
+    if (_appData == null) return [];
+    
+    final allQuizzes = _appData!.questions.values.expand((element) => element).toList();
+    return allQuizzes.where((q) => texts.contains(q.question)).toList();
+  }
+
+  void _startQuizByCategory(BuildContext context, String categoryKey) {
+    if (_appData == null) return;
+    
+    final quizzes = _appData!.questions[categoryKey] ?? [];
+    final highScoreKey = 'highscore_$categoryKey';
     
     if (quizzes.isEmpty) {
        ScaffoldMessenger.of(context).showSnackBar(
@@ -350,132 +293,150 @@ class _HomePageState extends State<HomePage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
+    final l10n = AppLocalizations.of(context)!;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          "運行管理者 貨物",
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        centerTitle: true,
+        title: Text(_appData?.config.appTitle ?? l10n.appTitle),
       ),
       body: Column(
         children: [
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20.0),
+              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 24.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const SizedBox(height: 10),
-                  const Text(
-                    "スキマ時間でサクサク合格！一問一答",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  // Part 1: 貨物自動車運送事業法
-                  _MenuButton(
-                    title: "貨物自動車運送事業法",
-                    icon: Icons.local_shipping,
-                    iconColor: Colors.blueAccent,
-                    onTap: () => _startQuizByCategory(context, 'part1'),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Part 2: 道路運送車両法
-                  _MenuButton(
-                    title: "道路運送車両法",
-                    icon: Icons.build,
-                    iconColor: Colors.orange,
-                    onTap: () => _startQuizByCategory(context, 'part2'),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Part 3: 道路交通法
-                  _MenuButton(
-                    title: "道路交通法",
-                    icon: Icons.traffic,
-                    iconColor: Colors.redAccent,
-                    onTap: () => _startQuizByCategory(context, 'part3'),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Part 4: 労働基準法
-                  _MenuButton(
-                    title: "労働基準法",
-                    icon: Icons.work_history,
-                    iconColor: Colors.green,
-                    onTap: () => _startQuizByCategory(context, 'part4'),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Part 5: 実務上の知識及び能力
-                  _MenuButton(
-                    title: "実務上の知識及び能力",
-                    icon: Icons.map,
-                    iconColor: Colors.purple,
-                    onTap: () => _startQuizByCategory(context, 'part5'),
-                  ),
-                  const SizedBox(height: 40),
-
-                  // Weakness Review
-                  ElevatedButton.icon(
-                    onPressed: _weaknessCount > 0 ? () => _startWeaknessReview(context) : null,
-                    icon: const Icon(Icons.refresh),
-                    label: Text("苦手を復習する ($_weaknessCount問)"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.redAccent,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      elevation: 2,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  const SizedBox(height: 40),
-
-                  // Premium Unlock
-                  const PremiumUnlockCard(),
+                  // Subtitle removed as per user request
+                  const SizedBox(height: 8),
                   
-                  // Restore Purchase
-                  Align(
-                    alignment: Alignment.center,
-                    child: TextButton(
-                      onPressed: () async {
-                        await PurchaseManager.instance.restorePurchases();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("購入の復元を試みました")),
+                  // Mode Toggle
+                  Center(
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: PurchaseManager.instance.isPremium,
+                      builder: (context, isPremium, child) {
+                        return ModeToggle(
+                          isSequential: _isSequentialMode,
+                          isPremium: isPremium,
+                          onModeChanged: (val) {
+                            setState(() {
+                              _isSequentialMode = val;
+                            });
+                          },
+                          onLockedTap: _showPremiumDialog,
                         );
                       },
-                      child: const Text(
-                        "購入を復元する",
-                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Dynamic Part Buttons
+                  if (_appData != null)
+                    ..._appData!.categoryOrder.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final catName = entry.value;
+                      
+                      final colors = [
+                        Colors.blueAccent,
+                        Colors.orange,
+                        Colors.redAccent,
+                        Colors.green,
+                        Colors.purpleAccent,
+                        Colors.teal,
+                      ];
+                      final color = colors[index % colors.length];
+
+                      return Center(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minWidth: double.infinity,
+                            maxWidth: ResponsiveHelper.respCardWidth(context) ?? double.infinity,
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 16),
+                            child: _MenuButton(
+                              title: catName,
+                              icon: Icons.menu_book_rounded,
+                              iconColor: color,
+                              onTap: () => _startQuizByCategory(context, catName),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  if (_appData != null && _appData!.categoryOrder.isNotEmpty)
+                    const SizedBox(height: 24),
+
+                  // Weakness Review
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minWidth: double.infinity,
+                        maxWidth: ResponsiveHelper.respCardWidth(context) ?? double.infinity,
+                      ),
+                      child: ElevatedButton.icon(
+                        onPressed: _weaknessCount > 0 ? () => _startWeaknessReview(context) : null,
+                        icon: const Icon(Icons.menu_book_rounded),
+                        label: Text(l10n.reviewWeakness(_weaknessCount)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.redAccent,
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(
+                            vertical: ResponsiveHelper.respPadding(context, 16),
+                          ),
+                          elevation: 2,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          textStyle: TextStyle(
+                            fontSize: ResponsiveHelper.respFontSize(context, 18),
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ),
                   ),
                   const SizedBox(height: 20),
 
-                  // Sister App Link
+                  // Sister App Promotion
                   ValueListenableBuilder<bool>(
                     valueListenable: PurchaseManager.instance.isPremium,
                     builder: (context, isPremium, child) {
                       if (isPremium) return const SizedBox.shrink();
-                      return const _SisterAppButton();
+                      if (_appData?.config.nextAppEnabled == false) return const SizedBox.shrink();
+                      
+                      return Center(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minWidth: double.infinity,
+                            maxWidth: ResponsiveHelper.respCardWidth(context) ?? double.infinity,
+                          ),
+                          child: Column(
+                            children: [
+                              _SisterAppPromotion(config: _appData?.config),
+                              const SizedBox(height: 10),
+                            ],
+                          ),
+                        ),
+                      );
                     },
                   ),
-                  const SizedBox(height: 40),
+
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minWidth: double.infinity,
+                        maxWidth: ResponsiveHelper.respCardWidth(context) ?? double.infinity,
+                      ),
+                      child: const PremiumUnlockCard(),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
                 ],
               ),
             ),
           ),
-          
-          // Ad Banner removed
         ],
       ),
     );
@@ -500,12 +461,12 @@ class _MenuButton extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            color: const Color(0xFF0F172A).withOpacity(0.06),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
@@ -513,136 +474,43 @@ class _MenuButton extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(24),
           child: Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: EdgeInsets.symmetric(
+              horizontal: ResponsiveHelper.respPadding(context, 20.0),
+              vertical: ResponsiveHelper.respPadding(context, 12.0),
+            ),
             child: Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: EdgeInsets.all(ResponsiveHelper.respPadding(context, 12)),
                   decoration: BoxDecoration(
-                    color: iconColor.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
+                    color: iconColor.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                  child: Icon(icon, color: iconColor, size: 32),
+                  child: Icon(
+                    icon,
+                    color: iconColor,
+                    size: ResponsiveHelper.respIconSize(context, 32),
+                  ),
                 ),
-                const SizedBox(width: 16),
+                SizedBox(width: ResponsiveHelper.respPadding(context, 20)),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                      ),
-                    ],
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: ResponsiveHelper.respFontSize(context, 18),
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF1E293B),
+                      letterSpacing: 0.5,
+                    ),
                   ),
                 ),
-                Icon(Icons.chevron_right, color: Colors.grey[400]),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-}
-
-class _SisterAppButton extends StatelessWidget {
-  const _SisterAppButton();
-
-  Future<void> _launchURL(BuildContext context) async {
-    final Uri url = Uri.parse('https://apps.apple.com/app/id6757862966');
-    
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text("姉妹アプリへ移動"),
-          content: const Text("App Storeを開いて姉妹アプリを表示しますか？"),
-          actions: [
-            TextButton(
-              child: const Text("キャンセル"),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-            TextButton(
-              child: const Text("移動する", style: TextStyle(fontWeight: FontWeight.bold)),
-              onPressed: () async {
-                Navigator.of(context).pop();
-                if (!await launchUrl(url)) {
-                  debugPrint('Could not launch $url');
-                }
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () => _launchURL(context),
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Image.asset(
-                    'assets/sister_app_icon.jpg',
-                    width: 60,
-                    height: 60,
-                    fit: BoxFit.cover,
-                  ),
+                Icon(
+                  Icons.chevron_right,
+                  color: Colors.blueGrey[300],
+                  size: ResponsiveHelper.respIconSize(context, 28),
                 ),
-                const SizedBox(width: 16),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "４択問題アプリリリース！",
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        "空き時間にサクサク解ける\n姉妹アプリはこちら",
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Icon(Icons.open_in_new, color: Colors.grey[400]),
               ],
             ),
           ),
@@ -651,6 +519,8 @@ class _SisterAppButton extends StatelessWidget {
     );
   }
 }
+
+
 
 
 // -----------------------------------------------------------------------------
@@ -683,7 +553,30 @@ class _QuizPageState extends State<QuizPage> {
   final List<Quiz> _incorrectQuizzes = [];
   final List<Quiz> _correctQuizzesInReview = [];
   final List<Map<String, dynamic>> _answerHistory = [];
-  Color _backgroundColor = const Color(0xFFF9F9F9);
+  Color _backgroundColor = const Color(0xFFF1F5F9);
+  bool _showTutorial = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkTutorial();
+  }
+
+  Future<void> _checkTutorial() async {
+    final shown = await PrefsHelper.isTutorialShown();
+    if (!shown && mounted) {
+      setState(() {
+        _showTutorial = true;
+      });
+    }
+  }
+
+  void _dismissTutorial() {
+    setState(() {
+      _showTutorial = false;
+    });
+    PrefsHelper.markTutorialShown();
+  }
 
   void _handleSwipeEnd(int previousIndex, int targetIndex, SwiperActivity activity) {
     if (activity is Swipe) {
@@ -703,19 +596,20 @@ class _QuizPageState extends State<QuizPage> {
           HapticFeedback.lightImpact();
           
           if (widget.isWeaknessReview) {
-            _correctQuizzesInReview.add(quiz);
+            _recordWeakness(quiz.question, true);
           }
         } else {
           _backgroundColor = Colors.red.withValues(alpha: 0.2);
           _incorrectQuizzes.add(quiz);
           HapticFeedback.heavyImpact();
+          _recordWeakness(quiz.question, false);
         }
       });
 
       Future.delayed(const Duration(milliseconds: 200), () {
         if (mounted) {
           setState(() {
-            _backgroundColor = const Color(0xFFF9F9F9);
+            _backgroundColor = const Color(0xFFF1F5F9);
           });
         }
       });
@@ -728,14 +622,17 @@ class _QuizPageState extends State<QuizPage> {
           content: Text(
             isCorrect ? "正解！ ⭕" : "不正解... ❌",
             textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              fontSize: ResponsiveHelper.respFontSize(context, 18),
+              fontWeight: FontWeight.bold,
+            ),
           ),
           backgroundColor: isCorrect ? Colors.green : Colors.redAccent,
           behavior: SnackBarBehavior.floating,
           margin: EdgeInsets.only(
             bottom: MediaQuery.of(context).size.height * 0.5,
-            left: 50,
-            right: 50,
+            left: ResponsiveHelper.respPadding(context, 50),
+            right: ResponsiveHelper.respPadding(context, 50),
           ),
         ),
       );
@@ -757,6 +654,15 @@ class _QuizPageState extends State<QuizPage> {
       await PrefsHelper.saveHighScore(widget.categoryKey!, _score);
     }
 
+    // Increment quiz completion count and check for review prompt
+    final completionCount = await PrefsHelper.incrementQuizCompletionCount();
+    if (completionCount == 3) {
+      final InAppReview inAppReview = InAppReview.instance;
+      if (await inAppReview.isAvailable()) {
+        inAppReview.requestReview();
+      }
+    }
+
     if (_incorrectQuizzes.isNotEmpty) {
       final incorrectTexts = _incorrectQuizzes.map((q) => q.question).toList();
       await PrefsHelper.addWeakQuestions(incorrectTexts);
@@ -768,42 +674,40 @@ class _QuizPageState extends State<QuizPage> {
     }
     
     if (mounted) {
-      // レビュー依頼チェック (広告表示前に行うか、広告と競合しないように注意)
-      // ここでは仕様通り「クイズ完了タイミング」でチェック
-      final shouldReview = await PrefsHelper.shouldRequestReview();
-      if (shouldReview) {
-        final InAppReview inAppReview = InAppReview.instance;
-        if (await inAppReview.isAvailable()) {
-          inAppReview.requestReview();
-        }
-      }
-
       final shouldShow = await PrefsHelper.shouldShowInterstitial();
       
       if (shouldShow) {
         AdManager.instance.showInterstitial(
           onComplete: () async {
-            if (!mounted) return;
-            
-            // 特別オファーチェック
-            final shouldOffer = await PrefsHelper.shouldShowSpecialOffer();
-            if (shouldOffer && mounted) {
-              await PrefsHelper.markSpecialOfferShown();
-              
-               await showDialog(
-                 context: context,
-                 builder: (context) => const SpecialOfferDialog(),
-               );
-            }
-            
             if (mounted) {
-              _navigateToResult();
+              // After interstitial, check for special offer
+              final showOffer = await PurchaseManager.instance.shouldShowSpecialOffer();
+              if (showOffer && mounted) {
+                await PurchaseManager.instance.markSpecialOfferAsShown();
+                if (!mounted) return;
+                await showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (context) => const SpecialOfferDialog(),
+                );
+              }
+              if (mounted) {
+                _navigateToResult();
+              }
             }
           },
         );
       } else {
         _navigateToResult();
       }
+    }
+  }
+
+  Future<void> _recordWeakness(String question, bool isCorrect) async {
+    if (isCorrect) {
+      await PrefsHelper.removeWeakQuestions([question]);
+    } else {
+      await PrefsHelper.addWeakQuestions([question]);
     }
   }
 
@@ -825,130 +729,147 @@ class _QuizPageState extends State<QuizPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.black54),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-      ),
-      extendBodyBehindAppBar: true, 
-      body: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        color: _backgroundColor,
-        child: SafeArea(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    final l10n = AppLocalizations.of(context)!;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.dark,
+      child: Scaffold(
+      body: Stack(
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            color: _backgroundColor,
+            child: SafeArea(
+              child: Column(
+                children: [
+                  // Custom Header Row
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(4, ResponsiveHelper.isTablet(context) ? 24 : 8, 24, 8),
+                    child: Row(
                       children: [
-                        Text(
-                          "第$_currentIndex問",
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
+                        IconButton(
+                          icon: const Icon(Icons.chevron_left_rounded, color: Colors.black54, size: 40),
+                          onPressed: () => Navigator.of(context).pop(),
+                          iconSize: 40,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                        Expanded(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: _currentIndex / widget.totalQuestions,
+                              minHeight: 8,
+                              backgroundColor: Colors.grey[300],
+                              valueColor: const AlwaysStoppedAnimation<Color>(Colors.orange),
+                            ),
                           ),
                         ),
+                        const SizedBox(width: 16),
                         Text(
                           "$_currentIndex / ${widget.totalQuestions}",
-                          style: const TextStyle(
-                            fontSize: 16,
+                          style: TextStyle(
+                            fontSize: ResponsiveHelper.respFontSize(context, 14),
                             color: Colors.grey,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: _currentIndex / widget.totalQuestions,
-                        minHeight: 8,
-                        backgroundColor: Colors.grey[300],
-                        valueColor: const AlwaysStoppedAnimation<Color>(Colors.orange),
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
+                      child: AppinioSwiper(
+                        controller: controller,
+                        cardCount: widget.quizzes.length,
+                        loop: false,
+                        backgroundCardCount: 2,
+                        swipeOptions: const SwipeOptions.symmetric(horizontal: true, vertical: false),
+                        onSwipeEnd: _handleSwipeEnd,
+                        cardBuilder: (context, index) {
+                          return _buildCard(widget.quizzes[index]);
+                        },
                       ),
                     ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: AppinioSwiper(
-                  controller: controller,
-                  cardCount: widget.quizzes.length,
-                  loop: false,
-                  backgroundCardCount: 2,
-                  swipeOptions: const SwipeOptions.symmetric(horizontal: true, vertical: false),
-                  onSwipeEnd: _handleSwipeEnd,
-                  cardBuilder: (context, index) {
-                    return _buildCard(widget.quizzes[index]);
-                  },
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.only(bottom: 20, top: 20),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        controller.unswipe();
-                        setState(() {
-                          if (_currentIndex > 1) {
-                            _currentIndex--;
-                          }
-                          if (_answerHistory.isNotEmpty) {
-                            final last = _answerHistory.removeLast();
-                            final bool wasCorrect = last['result'];
-                            final Quiz quiz = last['quiz'];
-                            
-                            if (wasCorrect) {
-                              _score--;
-                              if (widget.isWeaknessReview) {
-                                _correctQuizzesInReview.remove(quiz);
+                  ),
+                  Container(
+                    padding: const EdgeInsets.only(bottom: 40, top: 20),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            controller.unswipe();
+                            setState(() {
+                              if (_currentIndex > 1) {
+                                _currentIndex--;
                               }
-                            } else {
-                              _incorrectQuizzes.remove(quiz);
-                            }
-                          }
-                        });
-                      },
-                      icon: const Icon(Icons.undo),
-                      label: const Text("元に戻す"),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black87,
-                        elevation: 2,
-                      ),
+                              if (_answerHistory.isNotEmpty) {
+                                final last = _answerHistory.removeLast();
+                                final bool wasCorrect = last['result'];
+                                final Quiz quiz = last['quiz'];
+                                
+                                if (wasCorrect) {
+                                  _score--;
+                                  if (widget.isWeaknessReview) {
+                                    _correctQuizzesInReview.remove(quiz);
+                                  }
+                                } else {
+                                  _incorrectQuizzes.remove(quiz);
+                                }
+                              }
+                            });
+                          },
+                          icon: const Icon(Icons.undo),
+                          label: Text(l10n.back),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black87,
+                            elevation: 2,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  // Ad Banner for Quiz
+                  SafeArea(
+                    top: false,
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: PurchaseManager.instance.isPremium,
+                      builder: (context, isPremium, child) {
+                        if (isPremium) return const SizedBox.shrink();
+                        return const SizedBox(
+                          height: 60,
+                          child: AdBanner(adKey: 'quiz', keepAlive: true),
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
-              // Ad Banner
-              const SizedBox(
-                width: double.infinity,
-                height: 60,
-                child: AdBanner(adKey: 'quiz_footer'),
-              ),
-            ],
+            ),
           ),
-        ),
+          if (_showTutorial)
+            Positioned.fill(
+              child: TutorialOverlay(onDismiss: _dismissTutorial),
+            ),
+        ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildCard(Quiz quiz) {
     bool hasImage = quiz.imagePath != null;
 
-    return Container(
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minWidth: double.infinity,
+          maxWidth: ResponsiveHelper.respCardWidth(context) ?? double.infinity,
+        ),
+        child: Container(
       margin: const EdgeInsets.all(20),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
@@ -986,33 +907,26 @@ class _QuizPageState extends State<QuizPage> {
                   },
                 ),
               ),
-            )
-          /*
-          else 
-            const Spacer(flex: 2)
-          */,
+            ),
 
           Expanded(
-            flex: hasImage ? 5 : 1,
+            flex: 5,
             child: Padding(
               padding: const EdgeInsets.all(24.0),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.start,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                    // Q. ラベル
-                    const Text(
-                      "Q.",
-                      style: TextStyle(
-                        fontSize: 40,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blueGrey,
-                      ),
-                      textAlign: TextAlign.center,
+                  const Text(
+                    "Q.",
+                    style: TextStyle(
+                      fontSize: 40,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey,
                     ),
+                    textAlign: TextAlign.center,
+                  ),
                   const SizedBox(height: 20),
-
-                  // 問題文
                   Expanded(
                     child: AutoSizeText(
                       quiz.question,
@@ -1057,6 +971,176 @@ class _QuizPageState extends State<QuizPage> {
           if (hasImage) const SizedBox(height: 10),
         ],
       ),
+     ),
+    ),
+   );
+  }
+
+}
+
+class _SisterAppPromotion extends StatelessWidget {
+  final AppConfig? config;
+  const _SisterAppPromotion({this.config});
+
+  Future<void> _launchURL(BuildContext context) async {
+    final l10n = AppLocalizations.of(context)!;
+    String urlString = config?.nextAppUrl ?? '6758681333';
+    
+    // If urlString is purely numeric, treat it as an Apple App ID
+    if (RegExp(r'^\d+$').hasMatch(urlString)) {
+      urlString = 'https://apps.apple.com/app/id$urlString';
+    }
+    
+    final Uri url = Uri.parse(urlString);
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                 Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: Colors.deepOrange[50],
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.lightbulb_rounded, color: Colors.deepOrange, size: 40),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  config?.nextAppText != null ? config!.nextAppText : l10n.sisterAppDialogTitle,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  l10n.sisterAppDialogBody,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: Text(l10n.cancel, style: const TextStyle(color: Colors.grey)),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          Navigator.of(context).pop();
+                          if (!await launchUrl(url)) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text(l10n.noData)), // Reuse or add more specific
+                              );
+                            }
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.deepOrange,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                        ),
+                        child: Text(l10n.open, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Card(
+      elevation: 4,
+      color: Colors.white,
+      shadowColor: Colors.black.withOpacity(0.1),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        onTap: () => _launchURL(context),
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: EdgeInsets.all(ResponsiveHelper.respPadding(context, 16.0)),
+          child: Row(
+            children: [
+               Container(
+                width: ResponsiveHelper.respSize(context, 60),
+                height: ResponsiveHelper.respSize(context, 60),
+                decoration: BoxDecoration(
+                  color: Colors.deepOrange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.lightbulb_rounded,
+                  color: Colors.deepOrange,
+                  size: ResponsiveHelper.respIconSize(context, 32),
+                ),
+              ),
+              SizedBox(width: ResponsiveHelper.respPadding(context, 16)),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l10n.sisterAppPromoTitle,
+                      style: TextStyle(
+                        fontSize: ResponsiveHelper.respFontSize(context, 12),
+                        color: Colors.grey,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      config?.nextAppText != null ? config!.nextAppText : l10n.sisterAppPromoSubtitle,
+                      style: TextStyle(
+                        fontSize: ResponsiveHelper.respFontSize(context, 15),
+                        fontWeight: FontWeight.bold,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.launch,
+                color: Colors.grey,
+                size: ResponsiveHelper.respIconSize(context, 24),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1087,92 +1171,78 @@ class ResultPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // -------------------------------------------------------------------------
-    // Helper: Determine result message
-    // -------------------------------------------------------------------------
-    String messageText = "";
-    Color messageColor = Colors.black;
-
-    if (score == total) {
-      messageText = "PERFECT! 🎉";
-      messageColor = Colors.green;
-    } else if (score >= 8) {
-      messageText = "合格圏内！素晴らしい！";
-      messageColor = Colors.green;
-    } else {
-      messageText = "あと少し！復習しよう";
-      messageColor = Colors.redAccent;
-    }
-
-    return Scaffold(
-      backgroundColor: const Color(0xFFF9F9F9),
-      body: SafeArea(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.dark,
+      child: Scaffold(
+      backgroundColor: const Color(0xFFF1F5F9),
+      body: SafeArea( // 1. SafeArea内
         child: Column(
           children: [
             // -----------------------------------------------------------------
-            // 1. Top Area (AdBanner + Score Card)
+            // 1. 上部エリア
             // -----------------------------------------------------------------
-             const SizedBox(
-               height: 60,
-               child: AdBanner(adKey: 'result'),
-             ),
-             
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(32),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  // Score Row
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
-                    children: [
-                      const Text(
-                        "正解数",
-                        style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.grey),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        "$score/$total",
-                        style: const TextStyle(
-                          fontSize: 48,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.orange,
-                        ),
-                      ),
+            const AdBanner(adKey: 'result'), // 一番上に広告バナー
+
+            Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minWidth: double.infinity,
+                  maxWidth: ResponsiveHelper.respCardWidth(context) ?? double.infinity,
+                ),
+                child: Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(32), // 角丸32px
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 5))
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  // Evaluation Message
-                  Text(
-                    messageText,
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: messageColor,
-                    ),
+                  child: Column(
+                    children: [
+                       Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Text(
+                            "正解数",
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            "$score/$total", // 9/10のようなスコア
+                            style: TextStyle(
+                              fontSize: ResponsiveHelper.respFontSize(context, 48),
+                              fontWeight: FontWeight.w900, // 太字
+                              color: Colors.orange,
+                            ),
+                          ),
+                        ],
+                      ),
+                      
+                      if (score == total)
+                        const Text(
+                          "PERFECT! 🎉",
+                          style: TextStyle(fontSize: 20, color: Colors.green, fontWeight: FontWeight.bold),
+                        )
+                      else
+                        Text(
+                          score >= 8 ? "合格圏内！素晴らしい！" : "あと少し！復習しよう",
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: score >= 8 ? Colors.green : Colors.red,
+                          ),
+                        ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
 
             // -----------------------------------------------------------------
-            // 2. Middle Area (Scrollable List)
+            // 2. 中央エリア（スクロール可能なリスト）
             // -----------------------------------------------------------------
             Expanded(
               child: ListView.builder(
@@ -1182,14 +1252,20 @@ class ResultPage extends StatelessWidget {
                   final item = history[index];
                   final Quiz quiz = item['quiz'];
                   final bool isCorrect = item['result'];
-                  final bool hasImage = quiz.imagePath != null;
 
-                  return Container(
+                  return Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minWidth: double.infinity,
+                        maxWidth: ResponsiveHelper.respCardWidth(context) ?? double.infinity,
+                      ),
+                      child: Card(
                     margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      // Optional: shadow or border if needed, user said "white card"
+                    elevation: 0,
+                    color: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16), // 角丸16px
+                      side: BorderSide(color: Colors.grey.withValues(alpha: 0.1)),
                     ),
                     child: Padding(
                       padding: const EdgeInsets.all(16),
@@ -1199,36 +1275,28 @@ class ResultPage extends StatelessWidget {
                           Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // Result Icon
                               Icon(
                                 isCorrect ? Icons.check_circle : Icons.cancel,
                                 color: isCorrect ? Colors.green : Colors.red,
                                 size: 28,
                               ),
                               const SizedBox(width: 12),
-                              // Question Text
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
                                       quiz.question,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 16),
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                                     ),
-                                    if (hasImage)
+                                    if (quiz.imagePath != null)
                                       Padding(
                                         padding: const EdgeInsets.only(top: 4.0),
                                         child: Row(
                                           children: [
-                                            Icon(Icons.image,
-                                                size: 16, color: Colors.grey[500]),
+                                            Icon(Icons.image, size: 16, color: Colors.grey[500]),
                                             const SizedBox(width: 4),
-                                            Text("画像問題",
-                                                style: TextStyle(
-                                                    color: Colors.grey[500],
-                                                    fontSize: 12)),
+                                            Text("画像問題", style: TextStyle(color: Colors.grey[500], fontSize: 12)),
                                           ],
                                         ),
                                       ),
@@ -1237,42 +1305,49 @@ class ResultPage extends StatelessWidget {
                               ),
                             ],
                           ),
-                          const SizedBox(height: 12),
-                          // Explanation
+                          const SizedBox(height: 8),
                           Container(
                             width: double.infinity,
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFECEFF1), // BlueGrey[50] aprox
+                              color: Colors.blueGrey.withValues(alpha: 0.05), // 薄い青灰色
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
                               "💡 ${quiz.explanation}",
                               style: TextStyle(
-                                  color: Colors.blueGrey[800], fontSize: 13),
+                                color: Colors.blueGrey[700],
+                                fontSize: ResponsiveHelper.respFontSize(context, 13),
+                              ),
                             ),
                           ),
                         ],
                       ),
                     ),
-                  );
-                },
+                  ),
+                ),
+              );
+            },
               ),
             ),
-
+            
             // -----------------------------------------------------------------
-            // 3. Bottom Area (Fixed Footer)
+            // 3. 下部エリア（固定フッター）
             // -----------------------------------------------------------------
             Container(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              decoration: const BoxDecoration(
-                color: Color(0xFFF9F9F9),
-              ),
-              child: Column(
-                children: [
+              padding: const EdgeInsets.all(16),
+              color: const Color(0xFFF9F9F9),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minWidth: double.infinity,
+                    maxWidth: ResponsiveHelper.respCardWidth(context) ?? double.infinity,
+                  ),
+                  child: Column(
+                    children: [
                   Row(
                     children: [
-                      // Mistake Review Button (Left)
+                      // 左ボタン: 「ミスを確認」 (全問正解時は非表示)
                       if (incorrectQuizzes.isNotEmpty) ...[
                         Expanded(
                           child: SizedBox(
@@ -1289,17 +1364,14 @@ class ResultPage extends StatelessWidget {
                                   ),
                                 );
                               },
-                              icon: const Icon(Icons.refresh),
+                              icon: const Icon(Icons.menu_book_rounded),
                               label: const Text("ミスを確認"),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.orange,
                                 foregroundColor: Colors.white,
                                 elevation: 0,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                textStyle: const TextStyle(
-                                    fontSize: 16, fontWeight: FontWeight.bold),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                               ),
                             ),
                           ),
@@ -1307,36 +1379,35 @@ class ResultPage extends StatelessWidget {
                         const SizedBox(width: 12),
                       ],
 
-                      // Retry / Home Button (Right)
+                      // 右ボタン: 「リトライ」 or 「ホームに戻る」
                       Expanded(
                         child: SizedBox(
                           height: 56,
                           child: ElevatedButton(
                             onPressed: () {
-                               if (isWeaknessReview) {
+                              if (this.isWeaknessReview) {
                                 Navigator.of(context).popUntil((route) => route.isFirst);
-                              } else {
-                                final shuffledAgain = List<Quiz>.from(originalQuizzes)..shuffle();
-                                Navigator.of(context).pushReplacement(
-                                  MaterialPageRoute(
-                                    builder: (context) => QuizPage(
-                                      quizzes: shuffledAgain,
-                                      categoryKey: categoryKey,
-                                      totalQuestions: shuffledAgain.length,
-                                    ),
-                                  ),
-                                );
+                                return;
                               }
+
+                              final shuffledAgain = List<Quiz>.from(this.originalQuizzes)..shuffle();
+                              Navigator.of(context).pushReplacement(
+                                MaterialPageRoute(
+                                  builder: (context) => QuizPage(
+                                    quizzes: shuffledAgain,
+                                    categoryKey: this.categoryKey,
+                                    totalQuestions: shuffledAgain.length,
+                                  ),
+                                ),
+                              );
                             },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.white,
                               foregroundColor: Colors.blueAccent,
                               elevation: 0,
                               side: const BorderSide(color: Colors.blueAccent, width: 2),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16)),
-                              textStyle: const TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.bold),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                             ),
                             child: Text(isWeaknessReview ? "ホームに戻る" : "リトライ"),
                           ),
@@ -1344,23 +1415,25 @@ class ResultPage extends StatelessWidget {
                       ),
                     ],
                   ),
+
                   const SizedBox(height: 12),
-                  // Back to Home Text Link
+                  
+                  // ホームに戻るリンク
                   TextButton(
                     onPressed: () {
                       Navigator.of(context).popUntil((route) => route.isFirst);
                     },
-                    child: const Text(
-                      "ホームに戻る",
-                      style: TextStyle(color: Colors.grey),
-                    ),
+                    child: const Text("ホームに戻る", style: TextStyle(color: Colors.grey)),
                   ),
                 ],
               ),
+             ),
             ),
+           ),
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }
