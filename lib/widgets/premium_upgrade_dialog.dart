@@ -191,16 +191,129 @@ class PremiumUpgradeDialog extends StatelessWidget {
   );
 }
 
-  Widget _buildBenefitRow(BuildContext context, IconData icon, String title, String description) {
+              // Benefit list
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Column(
+                  children: [
+                    _buildBenefitRow(context, Icons.format_list_numbered,
+                        l10n.featureSequentialTitle, l10n.featureSequentialDesc),
+                    const SizedBox(height: 14),
+                    _buildBenefitRow(context, Icons.bookmark_rounded,
+                        'Unlock Bookmarks', 'Bookmark questions and review them later.'),
+                    const SizedBox(height: 14),
+                    _buildBenefitRow(context, Icons.bar_chart_rounded,
+                        'View Detailed Stats',
+                        'Track your accuracy, progress, and best scores per category.'),
+                    const SizedBox(height: 14),
+                    _buildBenefitRow(context, Icons.stay_current_portrait,
+                        l10n.featureNoAdsTitle, l10n.featureNoAdsDesc),
+                  ],
+                ),
+              ),
+
+              // Buttons
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ValueListenableBuilder<bool>(
+                      valueListenable: PurchaseManager.instance.isPurchasing,
+                      builder: (context, isPurchasing, _) {
+                        return ElevatedButton(
+                          onPressed: isPurchasing
+                              ? null
+                              : () async {
+                                  try {
+                                    await PurchaseManager.instance.buyPremium();
+                                    if (context.mounted) Navigator.pop(context);
+                                  } catch (e) {
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Error: $e')),
+                                      );
+                                    }
+                                  }
+                                },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFF39C12),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                            elevation: 3,
+                          ),
+                          child: isPurchasing
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white),
+                                )
+                              : Text(l10n.purchase,
+                                  style: const TextStyle(
+                                      fontSize: 16, fontWeight: FontWeight.bold)),
+                        );
+                      },
+                    ),
+                    ValueListenableBuilder<bool>(
+                      valueListenable: PurchaseManager.instance.isPurchasing,
+                      builder: (context, isPurchasing, _) {
+                        return TextButton(
+                          onPressed: isPurchasing
+                              ? null
+                              : () async {
+                                  await PurchaseManager.instance.restorePurchases();
+                                  if (context.mounted) Navigator.pop(context);
+                                },
+                          child: Text(
+                            l10n.restorePurchase,
+                            style: TextStyle(
+                              color: isPurchasing
+                                  ? Colors.grey.withValues(alpha: 0.5)
+                                  : Colors.grey,
+                              fontSize: 13,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    ValueListenableBuilder<bool>(
+                      valueListenable: PurchaseManager.instance.isPurchasing,
+                      builder: (context, isPurchasing, _) {
+                        return TextButton(
+                          onPressed: isPurchasing ? null : () => Navigator.pop(context),
+                          child: Text(
+                            l10n.cancel,
+                            style: TextStyle(
+                              color: isPurchasing
+                                  ? Colors.grey.withValues(alpha: 0.5)
+                                  : Colors.grey,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBenefitRow(
+      BuildContext context, IconData icon, String title, String description) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(
-          icon,
-          color: const Color(0xFFF39C12),
-          size: ResponsiveHelper.respIconSize(context, 36),
-        ),
-        SizedBox(width: ResponsiveHelper.respPadding(context, 20)),
+        Icon(icon,
+            color: const Color(0xFFF39C12),
+            size: ResponsiveHelper.respIconSize(context, 24)),
+        const SizedBox(width: 14),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -208,16 +321,16 @@ class PremiumUpgradeDialog extends StatelessWidget {
               Text(
                 title,
                 style: TextStyle(
-                  fontSize: ResponsiveHelper.respFontSize(context, 18),
+                  fontSize: ResponsiveHelper.respFontSize(context, 15),
                   color: const Color(0xFF2C3E50),
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
               Text(
                 description,
                 style: TextStyle(
-                  fontSize: ResponsiveHelper.respFontSize(context, 14),
+                  fontSize: ResponsiveHelper.respFontSize(context, 12),
                   color: Colors.grey,
                   height: 1.4,
                 ),

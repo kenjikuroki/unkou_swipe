@@ -55,7 +55,7 @@ class PremiumUnlockCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            "プレミアムプランに\nアップグレード",
+                            "Upgrade to\nPremium",
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
@@ -65,7 +65,7 @@ class PremiumUnlockCard extends StatelessWidget {
                           ),
                           SizedBox(height: 4),
                           Text(
-                            "広告を非表示にして集中！",
+                            "Focus without ads!",
                             style: TextStyle(
                               fontSize: 14,
                               color: Colors.white70,
@@ -89,7 +89,7 @@ class PremiumUnlockCard extends StatelessWidget {
                         ],
                       ),
                       child: const Text(
-                        "購入",
+                        "Purchase",
                         style: TextStyle(
                           color: Colors.orange,
                           fontWeight: FontWeight.bold,

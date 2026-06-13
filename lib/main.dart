@@ -32,6 +32,9 @@ final RouteObserver<PageRoute<dynamic>> routeObserver =
     RouteObserver<PageRoute<dynamic>>();
 const bool kAlwaysShowExplanationModeNoticeForTesting = false;
 
+final RouteObserver<PageRoute<dynamic>> routeObserver =
+    RouteObserver<PageRoute<dynamic>>();
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -2264,6 +2267,145 @@ class _StatsBarChart extends StatelessWidget {
   }
 }
 
+
+
+class _HomeStatCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color backgroundColor;
+  final Color borderColor;
+  final Color labelColor;
+  final Color valueColor;
+  final Color iconColor;
+  final VoidCallback? onTap;
+
+  const _HomeStatCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.backgroundColor,
+    required this.borderColor,
+    required this.labelColor,
+    required this.valueColor,
+    required this.iconColor,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SoftSurface(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      borderColor: borderColor,
+      fillColor: backgroundColor,
+      boxShadow: AppChrome.softShadow,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 14, color: iconColor),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: labelColor)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: valueColor, height: 1),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DailyStatPoint {
+  final String label;
+  final int value;
+  const _DailyStatPoint({required this.label, required this.value});
+}
+
+class _StatsBarChart extends StatelessWidget {
+  final List<_DailyStatPoint> points;
+  final Color color;
+
+  const _StatsBarChart({required this.points, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final maxValue = points.fold<int>(0, (max, p) => p.value > max ? p.value : max);
+    final safeMax = maxValue == 0 ? 1 : maxValue;
+
+    return SizedBox(
+      height: 180,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: points.map((point) {
+          final ratio = point.value / safeMax;
+          return Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text(
+                    '${point.value}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.inkSoft,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 112,
+                    child: Align(
+                      alignment: Alignment.bottomCenter,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 220),
+                        height: math.max(6, 112 * ratio),
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.92),
+                          borderRadius: BorderRadius.circular(999),
+                          boxShadow: [
+                            BoxShadow(
+                              color: color.withValues(alpha: 0.18),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    point.label,
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.inkSoft,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
 // -----------------------------------------------------------------------------
 // 3. Quiz Page
 // -----------------------------------------------------------------------------
@@ -2422,6 +2564,10 @@ class _QuizPageState extends State<QuizPage> {
     if (!widget.showAnswerExplanation) {
       await Future.delayed(const Duration(milliseconds: 700));
     }
+    await PrefsHelper.addAnsweredCount(widget.quizzes.length);
+    await PrefsHelper.addDailyAnsweredCount(widget.quizzes.length);
+    await PrefsHelper.saveBestStreak(_bestCorrectStreak);
+    await PrefsHelper.saveDailyBestStreak(_bestCorrectStreak);
 
     if (widget.categoryKey != null) {
       await PrefsHelper.saveHighScore(
@@ -3931,6 +4077,554 @@ class _ExamDateOnboardingSheetState extends State<_ExamDateOnboardingSheet> {
   }
 }
 
+class _CollapsingResultSummary extends StatelessWidget {
+  final int score;
+  final int total;
+  final String message;
+  final double collapseProgress;
+
+  const _CollapsingResultSummary({
+    required this.score,
+    required this.total,
+    required this.message,
+    required this.collapseProgress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scoreFont = lerpDouble(48, 28, collapseProgress)!;
+    final labelFont = lerpDouble(17, 14, collapseProgress)!;
+    final horizontalPadding = lerpDouble(28, 20, collapseProgress)!;
+    final verticalPadding = lerpDouble(20, 14, collapseProgress)!;
+    final summaryHeight = lerpDouble(164, 80, collapseProgress)!;
+    final borderRadius = lerpDouble(32, 20, collapseProgress)!;
+    final messageOpacity = (1 - collapseProgress * 2.2).clamp(0.0, 1.0);
+
+    return Container(
+      height: summaryHeight,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minWidth: double.infinity,
+            maxWidth: ResponsiveHelper.respCardWidth(context) ?? double.infinity,
+          ),
+          child: SoftSurface(
+            borderRadius: BorderRadius.circular(borderRadius),
+            borderColor: AppColors.line.withValues(alpha: 0.78),
+            fillColor: Colors.white.withValues(alpha: 0.98),
+            child: ClipRect(
+              child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: horizontalPadding,
+                vertical: verticalPadding,
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        'Correct',
+                        style: TextStyle(
+                          fontSize: labelFont,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.inkMuted,
+                        ),
+                      ),
+                      SizedBox(width: lerpDouble(10, 8, collapseProgress)!),
+                      Text(
+                        '$score/$total',
+                        style: TextStyle(
+                          fontSize: ResponsiveHelper.respFontSize(context, scoreFont),
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.warning,
+                          letterSpacing: -1,
+                          height: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (collapseProgress < 0.5) ...[
+                    SizedBox(height: lerpDouble(10, 4, collapseProgress)!),
+                    Opacity(
+                      opacity: messageOpacity,
+                      child: Text(
+                        message,
+                        maxLines: 1,
+                        overflow: TextOverflow.fade,
+                        softWrap: false,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: score == total
+                              ? AppColors.success
+                              : score >= 8
+                                  ? AppColors.success
+                                  : AppColors.error,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsSheet extends StatefulWidget {
+  final int dailyGoal;
+  final bool notifEnabled;
+  final int notifHour;
+  final DateTime? examDate;
+  final int streak;
+  final void Function({int? goal, bool? notifEnabled, int? notifHour}) onChanged;
+  final void Function(DateTime?) onExamDateChanged;
+
+  const _SettingsSheet({
+    required this.dailyGoal,
+    required this.notifEnabled,
+    required this.notifHour,
+    required this.examDate,
+    required this.streak,
+    required this.onChanged,
+    required this.onExamDateChanged,
+  });
+
+  @override
+  State<_SettingsSheet> createState() => _SettingsSheetState();
+}
+
+class _SettingsSheetState extends State<_SettingsSheet> {
+  late int _goal;
+  late bool _notifEnabled;
+  late int _notifHour;
+  late DateTime? _examDate;
+
+  static const _goalOptions = [10, 20, 30, 50, 70, 100];
+
+  @override
+  void initState() {
+    super.initState();
+    _goal = widget.dailyGoal;
+    _notifEnabled = widget.notifEnabled;
+    _notifHour = widget.notifHour;
+    _examDate = widget.examDate;
+  }
+
+  Future<void> _pickExamDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _examDate ?? now.add(const Duration(days: 30)),
+      firstDate: now.subtract(const Duration(days: 1)),
+      lastDate: now.add(const Duration(days: 730)),
+      helpText: 'Select exam date',
+    );
+    if (picked == null) return;
+    setState(() => _examDate = picked);
+    widget.onExamDateChanged(picked);
+  }
+
+  Future<void> _clearExamDate() async {
+    setState(() => _examDate = null);
+    widget.onExamDateChanged(null);
+  }
+
+  Future<void> _pickTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: _notifHour, minute: 0),
+      helpText: 'Select notification time',
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
+    );
+    if (picked == null) return;
+    setState(() => _notifHour = picked.hour);
+    widget.onChanged(notifHour: picked.hour);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+        gradient: LinearGradient(
+          colors: [AppColors.backgroundTop, AppColors.backgroundBottom],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(24, 14, 24, 32),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 44, height: 5,
+                decoration: BoxDecoration(
+                  color: AppColors.line,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Settings',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: AppColors.ink),
+            ),
+            const SizedBox(height: 20),
+
+            // Daily Goal
+            const Text(
+              'Daily Goal',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.inkMuted),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: _goalOptions.map((g) {
+                final selected = _goal == g;
+                return Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() => _goal = g);
+                      widget.onChanged(goal: g);
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: selected ? AppColors.accent : Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: selected
+                              ? AppColors.accent
+                              : AppColors.line.withValues(alpha: 0.8),
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            '$g',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w900,
+                              color: selected ? Colors.white : AppColors.ink,
+                            ),
+                          ),
+                          Text(
+                            'Q',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: selected
+                                  ? Colors.white.withValues(alpha: 0.8)
+                                  : AppColors.inkMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+
+            const SizedBox(height: 24),
+            Container(height: 1, color: AppColors.line.withValues(alpha: 0.5)),
+            const SizedBox(height: 20),
+
+            // Notification
+            const Text(
+              'Study Reminder',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.inkMuted),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.line.withValues(alpha: 0.7)),
+              ),
+              child: Column(
+                children: [
+                  // ON/OFF
+                  Row(
+                    children: [
+                      const Icon(Icons.notifications_rounded, size: 18, color: AppColors.inkMuted),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'Notifications',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.ink),
+                        ),
+                      ),
+                      Switch.adaptive(
+                        value: _notifEnabled,
+                        activeColor: AppColors.accent,
+                        onChanged: (v) {
+                          setState(() => _notifEnabled = v);
+                          widget.onChanged(notifEnabled: v);
+                        },
+                      ),
+                    ],
+                  ),
+                  if (_notifEnabled) ...[
+                    Divider(height: 1, color: AppColors.line.withValues(alpha: 0.5)),
+                    // Time
+                    GestureDetector(
+                      onTap: _pickTime,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.access_time_rounded, size: 18, color: AppColors.inkMuted),
+                            const SizedBox(width: 12),
+                            const Expanded(
+                              child: Text(
+                                'Time',
+                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.ink),
+                              ),
+                            ),
+                            Text(
+                              '${_notifHour.toString().padLeft(2, '0')}:00',
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.accent,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.inkMuted),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 24),
+            Container(height: 1, color: AppColors.line.withValues(alpha: 0.5)),
+            const SizedBox(height: 4),
+
+            // Restore Purchase
+            ValueListenableBuilder<bool>(
+              valueListenable: PurchaseManager.instance.isPurchasing,
+              builder: (context, isPurchasing, _) {
+                return TextButton(
+                  onPressed: isPurchasing
+                      ? null
+                      : () async {
+                          await PurchaseManager.instance.restorePurchases();
+                          if (context.mounted) Navigator.pop(context);
+                        },
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.inkMuted,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.restore_rounded, size: 16,
+                          color: isPurchasing
+                              ? AppColors.inkMuted.withValues(alpha: 0.4)
+                              : AppColors.inkMuted),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Restore Purchase',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: isPurchasing
+                              ? AppColors.inkMuted.withValues(alpha: 0.4)
+                              : AppColors.inkMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ExamDateOnboardingSheet extends StatefulWidget {
+  final DateTime? initialDate;
+  final ValueChanged<DateTime> onDateSelected;
+
+  const _ExamDateOnboardingSheet({
+    required this.initialDate,
+    required this.onDateSelected,
+  });
+
+  @override
+  State<_ExamDateOnboardingSheet> createState() => _ExamDateOnboardingSheetState();
+}
+
+class _ExamDateOnboardingSheetState extends State<_ExamDateOnboardingSheet> {
+  DateTime? _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = widget.initialDate;
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selected ?? DateTime.now().add(const Duration(days: 30)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 730)),
+      helpText: 'Select exam date',
+      confirmText: 'Confirm',
+      cancelText: 'Cancel',
+    );
+    if (picked != null) setState(() => _selected = picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dateLabel = _selected == null
+        ? 'Select date'
+        : '${_selected!.month}/${_selected!.day}/${_selected!.year}';
+
+    return Container(
+      decoration: const BoxDecoration(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+        gradient: LinearGradient(
+          colors: [AppColors.backgroundTop, AppColors.backgroundBottom],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(24, 14, 24, 32),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 44,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: AppColors.line,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Set Exam Date',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: AppColors.ink),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'The days until your exam will be shown.',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.inkSoft),
+            ),
+            const SizedBox(height: 24),
+            GestureDetector(
+              onTap: _pickDate,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: _selected != null
+                        ? AppColors.accent.withValues(alpha: 0.5)
+                        : AppColors.line,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.calendar_month_rounded,
+                      color: _selected != null ? AppColors.accent : AppColors.inkMuted,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      dateLabel,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: _selected != null ? AppColors.ink : AppColors.inkMuted,
+                      ),
+                    ),
+                    const Spacer(),
+                    Icon(Icons.chevron_right_rounded, color: AppColors.inkMuted),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              height: 52,
+              child: ElevatedButton(
+                onPressed: _selected == null
+                    ? null
+                    : () {
+                        widget.onDateSelected(_selected!);
+                        Navigator.of(context).pop();
+                      },
+                style: AppChrome.primaryButtonStyle(
+                  backgroundColor: AppColors.accent,
+                  foregroundColor: Colors.white,
+                  radius: 20,
+                ),
+                child: const Text(
+                  'Set',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 52,
+              child: OutlinedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.inkSoft,
+                  side: BorderSide(color: AppColors.line.withValues(alpha: 0.9)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                ),
+                child: const Text(
+                  'Set later',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _SisterAppPromotion extends StatelessWidget {
   final AppConfig? config;
   const _SisterAppPromotion({this.config});
@@ -4463,6 +5157,15 @@ class _ResultPageState extends State<ResultPage> {
                                     ),
                                   ),
                                 ),
+                              ),
+                              const SizedBox(width: 8),
+                              IconButton(
+                                onPressed: () => _toggleBookmark(quiz),
+                                icon: Icon(
+                                  isBookmarked ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                                  color: isBookmarked ? AppColors.warning : AppColors.inkMuted,
+                                ),
+                                tooltip: isBookmarked ? 'Remove bookmark' : 'Bookmark',
                               ),
                             ],
                           ),

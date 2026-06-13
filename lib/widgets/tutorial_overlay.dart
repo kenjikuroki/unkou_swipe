@@ -21,7 +21,7 @@ class TutorialOverlay extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 40),
                 child: Text(
-                  '左右にスワイプして回答',
+                  'Swipe left or right to answer',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white,
@@ -52,7 +52,7 @@ class TutorialOverlay extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    '× 誤り',
+                    '✕ False',
                     style: TextStyle(
                       color: Colors.redAccent,
                       fontSize: 20,
@@ -76,7 +76,7 @@ class TutorialOverlay extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    '○ 正しい',
+                    '✔ True',
                     style: TextStyle(
                       color: Colors.greenAccent,
                       fontSize: 20,
@@ -105,7 +105,7 @@ class TutorialOverlay extends StatelessWidget {
                       elevation: 0,
                     ),
                     child: const Text(
-                      'はじめる',
+                      'Start',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,

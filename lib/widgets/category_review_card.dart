@@ -67,7 +67,7 @@ class CategoryReviewCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    "$count問",
+                    "$count Q",
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,

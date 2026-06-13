@@ -169,7 +169,7 @@ class _AdBannerState extends State<AdBanner> {
                   const Icon(Icons.star, color: Colors.white, size: 24),
                 const SizedBox(width: 8),
                 const Text(
-                  "プレミアムプランで広告を完全非表示に！",
+                  "Go Premium to remove all ads!",
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 14,

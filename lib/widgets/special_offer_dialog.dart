@@ -42,7 +42,7 @@ class SpecialOfferDialog extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  "期間限定オファー",
+                  "Limited-Time Offer",
                   style: TextStyle(
                     fontSize: ResponsiveHelper.respFontSize(context, 26),
                     fontWeight: FontWeight.bold,
@@ -54,13 +54,13 @@ class SpecialOfferDialog extends StatelessWidget {
                 FutureBuilder<String?>(
                   future: PrefsHelper.getAppDataCache(),
                   builder: (context, snapshot) {
-                    String dateText = "期間限定特別価格！";
+                    String dateText = "Special limited-time price!";
                     if (snapshot.hasData && snapshot.data != null) {
                       try {
                         final data = AppData.fromJson(json.decode(snapshot.data!));
                         if (data.config.saleEndDate != null) {
                           final date = data.config.saleEndDate!;
-                          dateText = "${date.month}月${date.day}日まで特別価格！";
+                          dateText = "Special price until ${date.month}/${date.day}!";
                         }
                       } catch (_) {}
                     }
@@ -181,7 +181,7 @@ class SpecialOfferDialog extends StatelessWidget {
                                         ),
                                       )
                                     : Text(
-                                        "今すぐ¥$salePriceで購入",
+                                        "Buy now for \$$salePrice",
                                         style: TextStyle(
                                           fontSize: ResponsiveHelper.respFontSize(context, 20),
                                           fontWeight: FontWeight.w800,
@@ -200,7 +200,7 @@ class SpecialOfferDialog extends StatelessWidget {
                 TextButton(
                   onPressed: () => Navigator.pop(context),
                   child: Text(
-                    "いいえ、結構です",
+                    "No thanks",
                     style: TextStyle(
                       color: const Color(0xFF94A3B8),
                       fontSize: ResponsiveHelper.respFontSize(context, 15),

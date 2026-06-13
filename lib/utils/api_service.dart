@@ -25,10 +25,18 @@ class ApiService {
     // キャッシュなし or 無効データ → バンドルされたassetを使用
     if (kDebugMode) debugPrint('ApiService: Using bundled fallback for $appId');
     try {
-      final fallbackString = await rootBundle.loadString('assets/fallback_data.json');
-      return AppData.fromJson(json.decode(fallbackString));
+      final url = Uri.parse('$_baseUrl?id=$appId');
+      final response = await http.get(url).timeout(const Duration(seconds: 20));
+      if (response.statusCode == 200) {
+        final data = _parseUsableAppData(response.body, appId);
+        if (data != null) {
+          await PrefsHelper.saveAppDataCache(response.body);
+          debugPrint('ApiService: Network fetch successful for $appId');
+          return data;
+        }
+      }
     } catch (e) {
-      debugPrint('ApiService: Fallback asset error - $e');
+      debugPrint('ApiService: Network fetch failed - $e');
     }
 
     return null;
