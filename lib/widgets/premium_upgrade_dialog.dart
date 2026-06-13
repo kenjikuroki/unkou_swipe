@@ -15,6 +15,10 @@ class PremiumUpgradeDialog extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Container(
         width: ResponsiveHelper.isTablet(context) ? 500 : null,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
+        child: SingleChildScrollView(
         child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -67,6 +71,13 @@ class PremiumUpgradeDialog extends StatelessWidget {
                   Icons.format_list_numbered,
                   l10n.featureSequentialTitle,
                   l10n.featureSequentialDesc,
+                ),
+                const SizedBox(height: 24),
+                _buildBenefitRow(
+                  context,
+                  Icons.bookmark_rounded,
+                  'ブックマーク機能の解放',
+                  '気になった問題をブックマークして、あとでまとめて復習できます。',
                 ),
                 const SizedBox(height: 24),
                 _buildBenefitRow(
@@ -142,10 +153,30 @@ class PremiumUpgradeDialog extends StatelessWidget {
                   valueListenable: PurchaseManager.instance.isPurchasing,
                   builder: (context, isPurchasing, child) {
                     return TextButton(
+                      onPressed: isPurchasing
+                          ? null
+                          : () async {
+                              await PurchaseManager.instance.restorePurchases();
+                              if (context.mounted) Navigator.pop(context);
+                            },
+                      child: Text(
+                        l10n.restorePurchase,
+                        style: TextStyle(
+                          color: isPurchasing ? Colors.grey.withValues(alpha: 0.5) : Colors.grey,
+                          fontSize: 13,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                ValueListenableBuilder<bool>(
+                  valueListenable: PurchaseManager.instance.isPurchasing,
+                  builder: (context, isPurchasing, child) {
+                    return TextButton(
                       onPressed: isPurchasing ? null : () => Navigator.pop(context),
                       child: Text(
                         l10n.cancel,
-                        style: TextStyle(color: isPurchasing ? Colors.grey.withOpacity(0.5) : Colors.grey),
+                        style: TextStyle(color: isPurchasing ? Colors.grey.withValues(alpha: 0.5) : Colors.grey),
                       ),
                     );
                   },
@@ -154,6 +185,7 @@ class PremiumUpgradeDialog extends StatelessWidget {
             ),
           ),
         ],
+      ),
       ),
     ),
   );

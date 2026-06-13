@@ -14,6 +14,7 @@ class AppConfig {
   final String premiumProductId;
   final String platformAppId;
   final String appId;
+  final String feedbackUrl;
 
   AppConfig({
     required this.saleEnabled,
@@ -29,11 +30,22 @@ class AppConfig {
     required this.premiumProductId,
     required this.platformAppId,
     required this.appId,
+    this.feedbackUrl = '',
   });
 
   factory AppConfig.fromJson(Map<String, dynamic> json) {
+    String normalizeConfigValue(dynamic value) {
+      final normalized = value?.toString().trim() ?? '';
+      final lower = normalized.toLowerCase();
+      if (normalized.isEmpty || lower == 'nan' || lower == 'null') {
+        return '';
+      }
+      return normalized;
+    }
+
     DateTime? endDate;
-    if (json['sale_end_date'] != null && json['sale_end_date'].toString().isNotEmpty) {
+    if (json['sale_end_date'] != null &&
+        json['sale_end_date'].toString().isNotEmpty) {
       endDate = DateTime.tryParse(json['sale_end_date'].toString());
     }
 
@@ -43,35 +55,53 @@ class AppConfig {
     String nextUrl = '';
     String premiumId = '';
     String platformId = '';
-    
+
     if (Platform.isIOS) {
-      banner = json['ios_ad_banner']?.toString() ?? '';
-      inter = json['ios_ad_inter']?.toString() ?? '';
-      nextUrl = json['ios_next_app_url']?.toString() ?? '';
-      premiumId = json['ios_premium_id']?.toString() ?? '';
-      platformId = json['ios_id']?.toString() ?? '';
+      banner = normalizeConfigValue(json['ios_ad_banner']);
+      inter = normalizeConfigValue(json['ios_ad_inter']);
+      nextUrl = normalizeConfigValue(json['ios_next_app_url']);
+      premiumId = normalizeConfigValue(json['ios_premium_id']);
+      platformId = normalizeConfigValue(json['ios_id']);
     } else {
-      banner = (json['android_ad_banner'] ?? json['andoroid_ad_banner'])?.toString() ?? '';
-      inter = (json['android_ad_inter'] ?? json['andoroid_ad_inter'])?.toString() ?? '';
-      nextUrl = (json['android_next_app_url'] ?? json['andoroid_next_app_url'])?.toString() ?? '';
-      premiumId = (json['android_premium_id'] ?? json['andoroid_premium_id'])?.toString() ?? '';
-      platformId = (json['android_id'] ?? json['andoroid_id'])?.toString() ?? '';
+      banner = normalizeConfigValue(
+        json['android_ad_banner'] ?? json['andoroid_ad_banner'],
+      );
+      inter = normalizeConfigValue(
+        json['android_ad_inter'] ?? json['andoroid_ad_inter'],
+      );
+      nextUrl = normalizeConfigValue(
+        json['android_next_app_url'] ?? json['andoroid_next_app_url'],
+      );
+      premiumId = normalizeConfigValue(
+        json['android_premium_id'] ?? json['andoroid_premium_id'],
+      );
+      platformId = normalizeConfigValue(
+        json['android_id'] ?? json['andoroid_id'],
+      );
     }
 
     return AppConfig(
-      saleEnabled: json['sale_enabled'] == true || json['sale_enabled'] == 1 || json['sale_enabled']?.toString() == '1',
+      saleEnabled:
+          json['sale_enabled'] == true ||
+          json['sale_enabled'] == 1 ||
+          json['sale_enabled']?.toString() == '1',
       saleEndDate: endDate,
       adBannerId: banner,
       adInterstitialId: inter,
       appTitle: json['app_name']?.toString() ?? '',
       nextAppText: json['next_app_text']?.toString() ?? '',
       nextAppUrl: nextUrl,
-      regularPrice: int.tryParse(json['regular_price']?.toString() ?? '') ?? 390,
+      regularPrice:
+          int.tryParse(json['regular_price']?.toString() ?? '') ?? 390,
       salePrice: int.tryParse(json['sale_price']?.toString() ?? '') ?? 190,
-      nextAppEnabled: json['next_app_enabled'] == true || json['next_app_enabled'] == 1 || json['next_app_enabled']?.toString() == '1',
-      premiumProductId: premiumId.isNotEmpty ? premiumId : 'unlock_joukaso',
+      nextAppEnabled:
+          json['next_app_enabled'] == true ||
+          json['next_app_enabled'] == 1 ||
+          json['next_app_enabled']?.toString() == '1',
+      premiumProductId: premiumId,
       platformAppId: platformId,
       appId: json['app_id']?.toString() ?? '',
+      feedbackUrl: json['feedback_url']?.toString() ?? '',
     );
   }
 
@@ -147,9 +177,9 @@ class AppData {
 
     for (var qJson in questionsList) {
       final quiz = Quiz.fromJson(qJson as Map<String, dynamic>);
-      String category = quiz.category;
+      String category = quiz.category.trim();
       if (category.isEmpty) category = 'その他';
-      
+
       if (!groupedQuestions.containsKey(category)) {
         groupedQuestions[category] = [];
         categoryOrder.add(category);

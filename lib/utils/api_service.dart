@@ -4,39 +4,26 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../models/app_data.dart';
 import 'prefs_helper.dart';
+import '../config/gas_config.dart';
 
 class ApiService {
-  static const String _baseUrl = 'https://script.google.com/macros/s/AKfycbxK_LaasUY5sgqXD7k_nrth8nXORYhlEHXo_hoYH1PECD6qG2q3arGyld5psRz8NiXT2A/exec';
-  Future<AppData?> loadAppData(String appId) async {
-    // 1. Try to fetch from network
-    try {
-      final url = Uri.parse('$_baseUrl?id=$appId');
-      final response = await http.get(url).timeout(const Duration(seconds: 10));
+  static String get _baseUrl => GasConfig.baseUrl;
 
-      if (response.statusCode == 200) {
-        final jsonString = response.body;
-        // Save to cache
-        await PrefsHelper.saveAppDataCache(jsonString);
-        return AppData.fromJson(json.decode(jsonString));
-      }
-    } catch (e) {
-      debugPrint('ApiService: Network error - $e');
-    }
-
-    // 2. If network fails, try to load from cache
+  // キャッシュ優先で即座に返す（ネットワーク不使用）
+  Future<AppData?> loadFromCacheOrFallback(String appId) async {
     final cachedJson = await PrefsHelper.getAppDataCache();
     if (cachedJson != null) {
       try {
-        return AppData.fromJson(json.decode(cachedJson));
+        final data = AppData.fromJson(json.decode(cachedJson));
+        if (_hasValidQuestions(data)) return data;
+        debugPrint('ApiService: Cache has empty questions, falling back to asset');
       } catch (e) {
-        debugPrint('ApiService: Cache error - $e');
+        debugPrint('ApiService: Cache parse error - $e');
       }
     }
 
-    // 3. Fallback to asset if cache is also null
-    if (kDebugMode) {
-      debugPrint('ApiService: Using fallback asset data for $appId');
-    }
+    // キャッシュなし or 無効データ → バンドルされたassetを使用
+    if (kDebugMode) debugPrint('ApiService: Using bundled fallback for $appId');
     try {
       final fallbackString = await rootBundle.loadString('assets/fallback_data.json');
       return AppData.fromJson(json.decode(fallbackString));
@@ -45,5 +32,33 @@ class ApiService {
     }
 
     return null;
+  }
+
+  // バックグラウンドでGASから取得しキャッシュを更新（次回起動に反映）
+  void refreshInBackground(String appId) {
+    _fetchAndCache(appId);
+  }
+
+  Future<void> _fetchAndCache(String appId) async {
+    try {
+      final url = Uri.parse('$_baseUrl?id=$appId');
+      final response = await http.get(url).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        // questionsが空のレスポンスはキャッシュしない（GAS側の不具合対策）
+        final data = AppData.fromJson(json.decode(response.body));
+        if (_hasValidQuestions(data)) {
+          await PrefsHelper.saveAppDataCache(response.body);
+          debugPrint('ApiService: Background refresh successful');
+        } else {
+          debugPrint('ApiService: Background refresh returned empty questions, cache not updated');
+        }
+      }
+    } catch (e) {
+      debugPrint('ApiService: Background refresh failed - $e');
+    }
+  }
+
+  bool _hasValidQuestions(AppData data) {
+    return data.questions.values.any((list) => list.isNotEmpty);
   }
 }

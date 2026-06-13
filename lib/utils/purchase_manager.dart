@@ -11,16 +11,14 @@ class PurchaseManager {
   static final PurchaseManager instance = PurchaseManager._internal();
   PurchaseManager._internal();
 
-  String _productId = 'unlock_premium'; // Default or GAS overridden, though currently unused as requested
+  String _productId = 'unlock_unkou';
 
-  // Get the product ID based on the current platform
+  bool _isValidProductId(String id) {
+    final normalized = id.trim().toLowerCase();
+    return normalized.isNotEmpty && normalized != 'nan' && normalized != 'null';
+  }
+
   String get productId {
-    if (kIsWeb) return _productId; // Fallback
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      return 'unlock_unkou';
-    } else if (defaultTargetPlatform == TargetPlatform.android) {
-      return 'unlock_premium';
-    }
     return _productId;
   }
 
@@ -41,13 +39,19 @@ class PurchaseManager {
     }
 
     final Stream purchaseUpdated = _iap.purchaseStream;
-    _subscription = purchaseUpdated.listen((purchaseDetailsList) {
-      _listenToPurchaseUpdated(purchaseDetailsList);
-    }, onDone: () {
-      _subscription.cancel();
-    }, onError: (error) {
-      debugPrint('PurchaseManager Error: $error');
-    }) as StreamSubscription<List<PurchaseDetails>>;
+    _subscription =
+        purchaseUpdated.listen(
+              (purchaseDetailsList) {
+                _listenToPurchaseUpdated(purchaseDetailsList);
+              },
+              onDone: () {
+                _subscription.cancel();
+              },
+              onError: (error) {
+                debugPrint('PurchaseManager Error: $error');
+              },
+            )
+            as StreamSubscription<List<PurchaseDetails>>;
 
     await _queryProducts();
   }
@@ -57,12 +61,18 @@ class PurchaseManager {
       _isAvailable = await _iap.isAvailable();
       if (_isAvailable) {
         Set<String> ids = {productId};
-        final ProductDetailsResponse response = await _iap.queryProductDetails(ids);
+        final ProductDetailsResponse response = await _iap.queryProductDetails(
+          ids,
+        );
         if (response.error == null) {
           _products = response.productDetails;
-          debugPrint('PurchaseManager: Loaded ${_products.length} products for $productId');
+          debugPrint(
+            'PurchaseManager: Loaded ${_products.length} products for $productId',
+          );
         } else {
-          debugPrint('PurchaseManager Error querying products: ${response.error}');
+          debugPrint(
+            'PurchaseManager Error querying products: ${response.error}',
+          );
         }
       }
     } catch (e) {
@@ -71,10 +81,16 @@ class PurchaseManager {
   }
 
   void setProductId(String id) {
-    if (id.isNotEmpty && id != _productId) {
-      debugPrint('PurchaseManager: Updating product ID from $_productId to $id');
+    if (_isValidProductId(id) && id != _productId) {
+      debugPrint(
+        'PurchaseManager: Updating product ID from $_productId to $id',
+      );
       _productId = id;
       _queryProducts();
+    } else if (!_isValidProductId(id)) {
+      debugPrint(
+        'PurchaseManager: Ignoring invalid product ID "$id", keeping $_productId',
+      );
     }
   }
 
@@ -116,19 +132,23 @@ class PurchaseManager {
     isPurchasing.value = true;
 
     try {
+      if (!_isAvailable || _products.isEmpty) {
+        debugPrint('PurchaseManager: Products not ready, re-querying...');
+        await _queryProducts();
+      }
+
       if (!_isAvailable) {
         debugPrint('PurchaseManager: IAP not available');
         throw Exception('In-app purchase is not available on this device.');
       }
 
       if (_products.isEmpty) {
-        debugPrint('PurchaseManager: No products found for $productId. Re-querying...');
-        await _queryProducts();
-      }
-
-      if (_products.isEmpty) {
-        debugPrint('PurchaseManager Error: Could not load product details for $productId');
-        throw Exception('Product details for "$productId" could not be loaded. Please check your internet connection or Store settings.');
+        debugPrint(
+          'PurchaseManager Error: Could not load product details for $productId',
+        );
+        throw Exception(
+          'Product details for "$productId" could not be loaded. Please check your internet connection or Store settings.',
+        );
       }
 
       ProductDetails? product;
@@ -138,11 +158,13 @@ class PurchaseManager {
           break;
         }
       }
-      
+
       // Fallback to first product if specific ID not found
       product ??= _products.first;
 
-      final PurchaseParam purchaseParam = PurchaseParam(productDetails: product);
+      final PurchaseParam purchaseParam = PurchaseParam(
+        productDetails: product,
+      );
       await _iap.buyNonConsumable(purchaseParam: purchaseParam);
     } catch (e) {
       isPurchasing.value = false;
@@ -163,13 +185,13 @@ class PurchaseManager {
 
     final cachedJson = await PrefsHelper.getAppDataCache();
     if (cachedJson == null) return false;
-    
+
     final appData = AppData.fromJson(json.decode(cachedJson));
     if (!appData.config.isSaleActive) return false;
-    
+
     final alreadyShown = await PrefsHelper.isSpecialOfferShown();
     if (alreadyShown) return false;
-    
+
     return true;
   }
 

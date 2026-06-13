@@ -28,9 +28,9 @@ import 'utils/api_service.dart';
 import 'utils/responsive_helper.dart';
 import 'package:in_app_review/in_app_review.dart';
 
-
 final RouteObserver<PageRoute<dynamic>> routeObserver =
     RouteObserver<PageRoute<dynamic>>();
+const bool kAlwaysShowExplanationModeNoticeForTesting = false;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -49,14 +49,13 @@ Future<void> main() async {
 // Data Models & Helpers are now in lib/models/app_data.dart
 // QuizData is replaced by ApiService and dynamic AppData in _MyHomePageState
 
-
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '浄化槽管理士対策',
+      title: '運行管理者（貨物）',
       debugShowCheckedModeBanner: false,
       localizationsDelegates: const [
         AppLocalizations.delegate,
@@ -64,9 +63,7 @@ class MyApp extends StatelessWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      supportedLocales: const [
-        Locale('ja', ''),
-      ],
+      supportedLocales: const [Locale('ja', '')],
       locale: const Locale('ja', ''),
       theme: AppChrome.theme(context),
       navigatorObservers: [routeObserver],
@@ -105,6 +102,8 @@ class _HomePageState extends State<HomePage> with RouteAware {
   int _todayAnsweredCount = 0;
   bool _notifEnabled = true;
   int _notifHour = 20;
+  bool _showAnswerExplanation = true;
+  bool _isExplanationNoticeShowing = false;
   Map<String, int> _categoryBookmarkCounts = {};
   Map<String, int> _categoryAccuracyRates = {};
   Map<String, int> _categoryAnsweredCounts = {};
@@ -133,12 +132,23 @@ class _HomePageState extends State<HomePage> with RouteAware {
   }
 
   @override
+  void reassemble() {
+    super.reassemble();
+    if (!kAlwaysShowExplanationModeNoticeForTesting) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _maybeShowExplanationModeNotice();
+      }
+    });
+  }
+
+  @override
   void dispose() {
     routeObserver.unsubscribe(this);
     _categoryPageController.dispose();
     super.dispose();
   }
-  
+
   Future<void> _initializeApp() async {
     // データ移行（ローカルのみ、高速）
     await MigrationHelper.performMigration();
@@ -147,13 +157,13 @@ class _HomePageState extends State<HomePage> with RouteAware {
     final apiService = ApiService();
     _appData = await apiService.loadFromCacheOrFallback('unkou');
 
-    // 広告IDはad_manager.dartのローカル定義を使用（APIオーバーライド無効）
-    // if (_appData != null) {
-    //   AdManager.instance.setAdUnitIds(
-    //     bannerId: _appData!.config.adBannerId,
-    //     interstitialId: _appData!.config.adInterstitialId,
-    //   );
-    // }
+    if (_appData != null) {
+      AdManager.instance.setAdUnitIds(
+        bannerId: _appData!.config.adBannerId,
+        interstitialId: _appData!.config.adInterstitialId,
+      );
+      PurchaseManager.instance.setProductId(_appData!.config.premiumProductId);
+    }
 
     await _loadUserData();
     if (mounted) {
@@ -199,8 +209,131 @@ class _HomePageState extends State<HomePage> with RouteAware {
       await Future.delayed(const Duration(milliseconds: 400));
       if (mounted) _showExamDateOnboarding();
     }
+
+    if (mounted) {
+      await Future.delayed(const Duration(milliseconds: 250));
+      if (mounted) {
+        _maybeShowExplanationModeNotice();
+      }
+    }
   }
-  
+
+  Future<void> _maybeShowExplanationModeNotice() async {
+    if (_isExplanationNoticeShowing || !mounted) return;
+
+    final hasExistingUsage =
+        await PrefsHelper.isTutorialShown() ||
+        (await PrefsHelper.getAnsweredCount()) > 0 ||
+        (await PrefsHelper.getBookmarkedQuestions()).isNotEmpty ||
+        (await PrefsHelper.getWeakQuestions()).isNotEmpty;
+    final shouldShow =
+        (kAlwaysShowExplanationModeNoticeForTesting || hasExistingUsage) &&
+        !await PrefsHelper.isExplanationModeNoticeShown();
+    if (!shouldShow || !mounted) return;
+
+    _isExplanationNoticeShowing = true;
+    await PrefsHelper.markExplanationModeNoticeShown();
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.accent.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: const Text(
+                    'アップデート',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.accent,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  '解説の表示タイミングを選べるようになりました',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.ink,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  '設定から、1問ごとに確認するか、最後にまとめて確認するかを切り替えできます。',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.inkSoft,
+                    height: 1.6,
+                  ),
+                ),
+                const SizedBox(height: 22),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text(
+                          'あとで',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: SizedBox(
+                        height: 48,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            _showSettingsSheet();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.accent,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            textStyle: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          child: const Text('設定を見る'),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    _isExplanationNoticeShowing = false;
+  }
+
   Future<void> _loadUserData() async {
     final weakList = await PrefsHelper.getWeakQuestions();
     final bookmarkList = await PrefsHelper.getBookmarkedQuestions();
@@ -214,6 +347,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
     final dailyGoal = await PrefsHelper.getDailyGoal();
     final notifEnabled = await PrefsHelper.getNotifEnabled();
     final notifHour = await PrefsHelper.getNotifHour();
+    final showAnswerExplanation = await PrefsHelper.getShowAnswerExplanation();
     if (_appData == null) return;
 
     final counts = <String, int>{};
@@ -228,18 +362,30 @@ class _HomePageState extends State<HomePage> with RouteAware {
       final categoryQuestionTexts = questions.map((q) => q.question).toSet();
 
       int weakCount = 0;
-      for (var t in weakList) { if (categoryQuestionTexts.contains(t)) weakCount++; }
+      for (var t in weakList) {
+        if (categoryQuestionTexts.contains(t)) weakCount++;
+      }
       counts[categoryKey] = weakCount;
 
       int bookmarkCount = 0;
-      for (var t in bookmarkList) { if (categoryQuestionTexts.contains(t)) bookmarkCount++; }
+      for (var t in bookmarkList) {
+        if (categoryQuestionTexts.contains(t)) bookmarkCount++;
+      }
       bookmarkCounts[categoryKey] = bookmarkCount;
 
-      highScores[categoryKey] = await PrefsHelper.getHighScore('highscore_$categoryKey');
+      highScores[categoryKey] = await PrefsHelper.getHighScore(
+        'highscore_$categoryKey',
+      );
 
-      final answeredCount = await PrefsHelper.getCategoryAnsweredCount(categoryKey);
-      final correctCount = await PrefsHelper.getCategoryCorrectCount(categoryKey);
-      accuracyRates[categoryKey] = answeredCount > 0 ? ((correctCount / answeredCount) * 100).round() : 0;
+      final answeredCount = await PrefsHelper.getCategoryAnsweredCount(
+        categoryKey,
+      );
+      final correctCount = await PrefsHelper.getCategoryCorrectCount(
+        categoryKey,
+      );
+      accuracyRates[categoryKey] = answeredCount > 0
+          ? ((correctCount / answeredCount) * 100).round()
+          : 0;
       answeredCounts[categoryKey] = answeredCount;
     }
 
@@ -256,6 +402,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
         _dailyGoalTarget = dailyGoal;
         _notifEnabled = notifEnabled;
         _notifHour = notifHour;
+        _showAnswerExplanation = showAnswerExplanation;
         _dailyAnsweredHistory = dailyAnswered;
         _dailyBestStreakHistory = dailyBestStreak;
         _categoryWeaknessCounts = counts;
@@ -267,9 +414,13 @@ class _HomePageState extends State<HomePage> with RouteAware {
     }
   }
 
-  void _startQuiz(BuildContext context, List<Quiz> quizList, String categoryKey) async {
+  void _startQuiz(
+    BuildContext context,
+    List<Quiz> quizList,
+    String categoryKey,
+  ) async {
     List<Quiz> questionsToUse = List<Quiz>.from(quizList);
-    
+
     if (!_isSequentialMode) {
       // Shuffle Mode (10 questions)
       questionsToUse.shuffle();
@@ -280,17 +431,18 @@ class _HomePageState extends State<HomePage> with RouteAware {
       // Sequential Mode (All questions, no shuffle)
       // They are already in order from the API data
     }
-    
+
     AdManager.instance.preloadAd('result');
     AdManager.instance.preloadAd('quiz');
     AdManager.instance.preloadInterstitial();
-    
+
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => QuizPage(
           quizzes: questionsToUse,
           categoryKey: categoryKey,
           totalQuestions: questionsToUse.length,
+          showAnswerExplanation: _showAnswerExplanation,
         ),
       ),
     );
@@ -314,28 +466,42 @@ class _HomePageState extends State<HomePage> with RouteAware {
         dailyGoal: _dailyGoalTarget,
         notifEnabled: _notifEnabled,
         notifHour: _notifHour,
+        showAnswerExplanation: _showAnswerExplanation,
         examDate: _examDate,
         streak: _consecutiveDaysStreak,
-        onChanged: ({int? goal, bool? notifEnabled, int? notifHour}) async {
-          if (goal != null) {
-            await PrefsHelper.setDailyGoal(goal);
-          }
-          if (notifEnabled != null) {
-            await PrefsHelper.setNotifEnabled(notifEnabled);
-          }
-          if (notifHour != null) {
-            await PrefsHelper.setNotifHour(notifHour);
-          }
-          final enabled = notifEnabled ?? _notifEnabled;
-          final hour = notifHour ?? _notifHour;
-          await NotificationService.scheduleDailyReminder(
-            examDate: _examDate,
-            streak: _consecutiveDaysStreak,
-            enabled: enabled,
-            hour: hour,
-          );
-          if (mounted) _loadUserData();
-        },
+        feedbackUrl: _appData?.config.feedbackUrl ?? '',
+        appTitle: _appData?.config.appTitle ?? '',
+        onChanged:
+            ({
+              int? goal,
+              bool? notifEnabled,
+              int? notifHour,
+              bool? showAnswerExplanation,
+            }) async {
+              if (goal != null) {
+                await PrefsHelper.setDailyGoal(goal);
+              }
+              if (notifEnabled != null) {
+                await PrefsHelper.setNotifEnabled(notifEnabled);
+              }
+              if (notifHour != null) {
+                await PrefsHelper.setNotifHour(notifHour);
+              }
+              if (showAnswerExplanation != null) {
+                await PrefsHelper.setShowAnswerExplanation(
+                  showAnswerExplanation,
+                );
+              }
+              final enabled = notifEnabled ?? _notifEnabled;
+              final hour = notifHour ?? _notifHour;
+              await NotificationService.scheduleDailyReminder(
+                examDate: _examDate,
+                streak: _consecutiveDaysStreak,
+                enabled: enabled,
+                hour: hour,
+              );
+              if (mounted) _loadUserData();
+            },
         onExamDateChanged: (date) async {
           if (date != null) {
             await PrefsHelper.setExamDate(date);
@@ -476,18 +642,30 @@ class _HomePageState extends State<HomePage> with RouteAware {
           children: [
             Row(
               children: [
-                const Icon(Icons.calendar_month_rounded, size: 14, color: AppColors.inkMuted),
+                const Icon(
+                  Icons.calendar_month_rounded,
+                  size: 14,
+                  color: AppColors.inkMuted,
+                ),
                 const SizedBox(width: 6),
                 const Text(
                   '試験日',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.inkMuted),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.inkMuted,
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             const Text(
               '設定から登録',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.inkSoft),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: AppColors.inkSoft,
+              ),
             ),
           ],
         ),
@@ -545,18 +723,30 @@ class _HomePageState extends State<HomePage> with RouteAware {
               const SizedBox(width: 6),
               Text(
                 '試験まで',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: textColor.withValues(alpha: 0.75)),
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: textColor.withValues(alpha: 0.75),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 4),
           Text(
             countdownText,
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: textColor),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+              color: textColor,
+            ),
           ),
           Text(
             examLabel,
-            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: textColor.withValues(alpha: 0.6)),
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: textColor.withValues(alpha: 0.6),
+            ),
           ),
         ],
       ),
@@ -619,8 +809,18 @@ class _HomePageState extends State<HomePage> with RouteAware {
     final innerRadius = Radius.zero;
     final outerRadius = const Radius.circular(17);
     final borderRadius = isFirst
-        ? BorderRadius.only(topLeft: outerRadius, bottomLeft: outerRadius, topRight: innerRadius, bottomRight: innerRadius)
-        : BorderRadius.only(topRight: outerRadius, bottomRight: outerRadius, topLeft: innerRadius, bottomLeft: innerRadius);
+        ? BorderRadius.only(
+            topLeft: outerRadius,
+            bottomLeft: outerRadius,
+            topRight: innerRadius,
+            bottomRight: innerRadius,
+          )
+        : BorderRadius.only(
+            topRight: outerRadius,
+            bottomRight: outerRadius,
+            topLeft: innerRadius,
+            bottomLeft: innerRadius,
+          );
 
     return Expanded(
       child: GestureDetector(
@@ -662,18 +862,18 @@ class _HomePageState extends State<HomePage> with RouteAware {
     final streakBg = streakAtRisk
         ? const Color(0xFFCC6A43).withValues(alpha: 0.10)
         : streakActive
-            ? const Color(0xFFFF9D0A).withValues(alpha: 0.10)
-            : Colors.white.withValues(alpha: 0.9);
+        ? const Color(0xFFFF9D0A).withValues(alpha: 0.10)
+        : Colors.white.withValues(alpha: 0.9);
     final streakBorder = streakAtRisk
         ? const Color(0xFFCC6A43).withValues(alpha: 0.35)
         : streakActive
-            ? const Color(0xFFFF9D0A).withValues(alpha: 0.35)
-            : AppColors.line.withValues(alpha: 0.88);
+        ? const Color(0xFFFF9D0A).withValues(alpha: 0.35)
+        : AppColors.line.withValues(alpha: 0.88);
     final streakValueColor = streakAtRisk
         ? const Color(0xFFCC6A43)
         : streakActive
-            ? const Color(0xFFE08800)
-            : AppColors.ink;
+        ? const Color(0xFFE08800)
+        : AppColors.ink;
 
     return Row(
       children: [
@@ -849,9 +1049,17 @@ class _HomePageState extends State<HomePage> with RouteAware {
                   child: SizedBox(
                     height: compact ? 44 : 48,
                     child: ElevatedButton.icon(
-                      onPressed: _weaknessCount > 0 ? () => _startWeaknessReview(context) : null,
-                      icon: const Icon(Icons.history_edu_rounded, color: Color(0xFFCC6A43)),
-                      label: Text('要復習 $_weaknessCount', style: const TextStyle(fontWeight: FontWeight.w800)),
+                      onPressed: _weaknessCount > 0
+                          ? () => _startWeaknessReview(context)
+                          : null,
+                      icon: const Icon(
+                        Icons.history_edu_rounded,
+                        color: Color(0xFFCC6A43),
+                      ),
+                      label: Text(
+                        '要復習 $_weaknessCount',
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
                       style: weaknessStyle,
                     ),
                   ),
@@ -866,22 +1074,36 @@ class _HomePageState extends State<HomePage> with RouteAware {
                         child: ElevatedButton.icon(
                           onPressed: _bookmarkCount > 0
                               ? () {
-                                  if (!isPremium) { _showPremiumDialog(); return; }
+                                  if (!isPremium) {
+                                    _showPremiumDialog();
+                                    return;
+                                  }
                                   _startBookmarkReview(context);
                                 }
                               : null,
                           icon: Icon(
-                            isPremium ? Icons.bookmark_rounded : Icons.lock_rounded,
+                            isPremium
+                                ? Icons.bookmark_rounded
+                                : Icons.lock_rounded,
                             color: const Color(0xFF5D729D),
                           ),
-                          label: Text('ブックマーク $_bookmarkCount', style: const TextStyle(fontWeight: FontWeight.w800)),
+                          label: Text(
+                            'ブックマーク $_bookmarkCount',
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFFF3F6FB),
                             foregroundColor: AppColors.accent,
                             elevation: 2,
-                            shadowColor: const Color(0xFF21314D).withValues(alpha: 0.05),
-                            side: BorderSide(color: AppColors.line.withValues(alpha: 0.9)),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                            shadowColor: const Color(
+                              0xFF21314D,
+                            ).withValues(alpha: 0.05),
+                            side: BorderSide(
+                              color: AppColors.line.withValues(alpha: 0.9),
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
                             padding: const EdgeInsets.symmetric(horizontal: 14),
                           ),
                         ),
@@ -891,13 +1113,11 @@ class _HomePageState extends State<HomePage> with RouteAware {
                 ),
               ],
             ),
-
           ],
         ),
       ),
     );
   }
-
 
   Widget _buildPremiumBanner() {
     return ValueListenableBuilder<bool>(
@@ -907,7 +1127,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
         return GestureDetector(
           onTap: _showPremiumDialog,
           child: Container(
-            constraints: const BoxConstraints(minHeight: 66),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
@@ -938,7 +1157,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        'プレミアムで効率学習',
+                        'プレミアムにアップグレード',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w800,
@@ -947,7 +1166,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
                       ),
                       SizedBox(height: 2),
                       Text(
-                        '広告なし・連続モード・ブックマーク解放',
+                        '広告なし・連続モード・ブックマーク機能解放',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
@@ -984,7 +1203,10 @@ class _HomePageState extends State<HomePage> with RouteAware {
     );
   }
 
-  void _startBookmarkReviewByCategory(BuildContext context, String categoryKey) async {
+  void _startBookmarkReviewByCategory(
+    BuildContext context,
+    String categoryKey,
+  ) async {
     final bookmarkedTexts = await PrefsHelper.getBookmarkedQuestions();
     if (!mounted || _appData == null) return;
     if (bookmarkedTexts.isEmpty) return;
@@ -993,9 +1215,9 @@ class _HomePageState extends State<HomePage> with RouteAware {
     if (categoryQuizzes.isEmpty) return;
 
     final categoryQuestionsSet = categoryQuizzes.map((q) => q.question).toSet();
-    final bookmarkedQuizzes = _getQuizzesFromTexts(bookmarkedTexts)
-        .where((q) => categoryQuestionsSet.contains(q.question))
-        .toList();
+    final bookmarkedQuizzes = _getQuizzesFromTexts(
+      bookmarkedTexts,
+    ).where((q) => categoryQuestionsSet.contains(q.question)).toList();
     if (bookmarkedQuizzes.isEmpty) return;
 
     AdManager.instance.preloadAd('result');
@@ -1007,6 +1229,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
         builder: (context) => QuizPage(
           quizzes: bookmarkedQuizzes,
           totalQuestions: bookmarkedQuizzes.length,
+          showAnswerExplanation: _showAnswerExplanation,
         ),
       ),
     );
@@ -1022,12 +1245,16 @@ class _HomePageState extends State<HomePage> with RouteAware {
       builder: (context) => CategoryReviewModal(
         counts: _categoryWeaknessCounts,
         categoryOrder: _appData!.categoryOrder,
-        onCategorySelected: (categoryKey) => _startWeaknessReviewByCategory(context, categoryKey),
+        onCategorySelected: (categoryKey) =>
+            _startWeaknessReviewByCategory(context, categoryKey),
       ),
     );
   }
 
-  void _startWeaknessReviewByCategory(BuildContext context, String categoryKey) async {
+  void _startWeaknessReviewByCategory(
+    BuildContext context,
+    String categoryKey,
+  ) async {
     final weakTexts = await PrefsHelper.getWeakQuestions();
     if (!mounted || _appData == null) return;
     if (weakTexts.isEmpty) return;
@@ -1036,10 +1263,10 @@ class _HomePageState extends State<HomePage> with RouteAware {
     if (categoryQuizzes.isEmpty) return;
 
     final categoryQuestionsSet = categoryQuizzes.map((q) => q.question).toSet();
-    final weakQuizzes = _getQuizzesFromTexts(weakTexts)
-        .where((q) => categoryQuestionsSet.contains(q.question))
-        .toList();
-    
+    final weakQuizzes = _getQuizzesFromTexts(
+      weakTexts,
+    ).where((q) => categoryQuestionsSet.contains(q.question)).toList();
+
     if (weakQuizzes.isEmpty) return;
 
     AdManager.instance.preloadAd('result');
@@ -1052,6 +1279,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
           quizzes: weakQuizzes,
           isWeaknessReview: true,
           totalQuestions: weakQuizzes.length,
+          showAnswerExplanation: _showAnswerExplanation,
         ),
       ),
     );
@@ -1061,21 +1289,23 @@ class _HomePageState extends State<HomePage> with RouteAware {
 
   List<Quiz> _getQuizzesFromTexts(List<String> texts) {
     if (_appData == null) return [];
-    
-    final allQuizzes = _appData!.questions.values.expand((element) => element).toList();
+
+    final allQuizzes = _appData!.questions.values
+        .expand((element) => element)
+        .toList();
     return allQuizzes.where((q) => texts.contains(q.question)).toList();
   }
 
   void _startQuizByCategory(BuildContext context, String categoryKey) {
     if (_appData == null) return;
-    
+
     final quizzes = _appData!.questions[categoryKey] ?? [];
 
     if (quizzes.isEmpty) {
-       ScaffoldMessenger.of(context).showSnackBar(
-         const SnackBar(content: Text('問題データがまだありません')),
-       );
-       return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('問題データがまだありません')));
+      return;
     }
     _startQuiz(context, quizzes, categoryKey);
   }
@@ -1089,7 +1319,10 @@ class _HomePageState extends State<HomePage> with RouteAware {
     final weaknessCount = _categoryWeaknessCounts[categoryKey] ?? 0;
     final completionRate = questionCount == 0
         ? 0.0
-        : (math.min(answeredCount, questionCount) / questionCount).clamp(0.0, 1.0);
+        : (math.min(answeredCount, questionCount) / questionCount).clamp(
+            0.0,
+            1.0,
+          );
     final completionPercent = (completionRate * 100).round();
 
     showModalBottomSheet(
@@ -1137,31 +1370,77 @@ class _HomePageState extends State<HomePage> with RouteAware {
                   borderColor: AppColors.line.withValues(alpha: 0.84),
                   fillColor: Colors.white.withValues(alpha: 0.95),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 16,
+                    ),
                     child: Column(
                       children: [
-                        _InfoSheetRow(label: '問題数', value: '$questionCount問', icon: Icons.quiz_rounded, color: AppColors.accent),
+                        _InfoSheetRow(
+                          label: '問題数',
+                          value: '$questionCount問',
+                          icon: Icons.quiz_rounded,
+                          color: AppColors.accent,
+                        ),
                         const SizedBox(height: 12),
                         _InfoSheetRow(
                           label: '正答率',
                           value: answeredCount > 0 ? '$accuracyRate%' : '未回答',
                           icon: Icons.percent_rounded,
-                          color: accuracyRate >= 70 ? const Color(0xFF4CAF50) : accuracyRate > 0 ? const Color(0xFFFF9D0A) : AppColors.inkMuted,
+                          color: accuracyRate >= 70
+                              ? const Color(0xFF4CAF50)
+                              : accuracyRate > 0
+                              ? const Color(0xFFFF9D0A)
+                              : AppColors.inkMuted,
                         ),
                         const SizedBox(height: 12),
-                        _InfoSheetRow(label: '回答数', value: '$answeredCount問', icon: Icons.bar_chart_rounded, color: AppColors.accent),
+                        _InfoSheetRow(
+                          label: '回答数',
+                          value: '$answeredCount問',
+                          icon: Icons.bar_chart_rounded,
+                          color: AppColors.accent,
+                        ),
                         const SizedBox(height: 12),
-                        _InfoSheetRow(label: '最高スコア', value: highScore > 0 ? '$highScore点' : '--', icon: Icons.emoji_events_rounded, color: const Color(0xFFE08800)),
+                        _InfoSheetRow(
+                          label: '最高スコア',
+                          value: highScore > 0 ? '$highScore点' : '--',
+                          icon: Icons.emoji_events_rounded,
+                          color: const Color(0xFFE08800),
+                        ),
                         const SizedBox(height: 12),
-                        _InfoSheetRow(label: '要復習', value: weaknessCount > 0 ? '$weaknessCount問' : 'なし', icon: Icons.history_edu_rounded, color: weaknessCount > 0 ? const Color(0xFFCC6A43) : const Color(0xFF4CAF50)),
+                        _InfoSheetRow(
+                          label: '要復習',
+                          value: weaknessCount > 0 ? '$weaknessCount問' : 'なし',
+                          icon: Icons.history_edu_rounded,
+                          color: weaknessCount > 0
+                              ? const Color(0xFFCC6A43)
+                              : const Color(0xFF4CAF50),
+                        ),
                         const SizedBox(height: 14),
                         Row(
                           children: [
-                            const Text('進捗', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.inkMuted)),
+                            const Text(
+                              '進捗',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.inkMuted,
+                              ),
+                            ),
                             const Spacer(),
                             Text(
-                              answeredCount == 0 ? '未着手' : completionRate >= 1.0 ? '完了' : '$completionPercent%',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: completionRate >= 1.0 ? const Color(0xFF4CAF50) : AppColors.accent),
+                              answeredCount == 0
+                                  ? '未着手'
+                                  : completionRate >= 1.0
+                                  ? '完了'
+                                  : '$completionPercent%',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                                color: completionRate >= 1.0
+                                    ? const Color(0xFF4CAF50)
+                                    : AppColors.accent,
+                              ),
                             ),
                           ],
                         ),
@@ -1171,8 +1450,14 @@ class _HomePageState extends State<HomePage> with RouteAware {
                           child: LinearProgressIndicator(
                             value: completionRate,
                             minHeight: 8,
-                            backgroundColor: AppColors.line.withValues(alpha: 0.4),
-                            valueColor: AlwaysStoppedAnimation<Color>(completionRate >= 1.0 ? const Color(0xFF4CAF50) : AppColors.accent),
+                            backgroundColor: AppColors.line.withValues(
+                              alpha: 0.4,
+                            ),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              completionRate >= 1.0
+                                  ? const Color(0xFF4CAF50)
+                                  : AppColors.accent,
+                            ),
                           ),
                         ),
                       ],
@@ -1195,7 +1480,9 @@ class _HomePageState extends State<HomePage> with RouteAware {
 
     final l10n = AppLocalizations.of(context)!;
     final seen = <String>{};
-    final categories = (_appData?.categoryOrder ?? []).where((c) => seen.add(c)).toList();
+    final categories = (_appData?.categoryOrder ?? [])
+        .where((c) => seen.add(c))
+        .toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -1253,7 +1540,12 @@ class _HomePageState extends State<HomePage> with RouteAware {
             builder: (context, constraints) {
               final isCompact = constraints.maxHeight < 610;
               return SingleChildScrollView(
-                padding: EdgeInsets.fromLTRB(14, isCompact ? 10 : 16, 14, isCompact ? 14 : 22),
+                padding: EdgeInsets.fromLTRB(
+                  14,
+                  isCompact ? 10 : 16,
+                  14,
+                  isCompact ? 14 : 22,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -1284,12 +1576,11 @@ class _HomePageState extends State<HomePage> with RouteAware {
                         ),
                       )
                     else ...[
-                      ListView.separated(
+                      ListView.builder(
                         padding: EdgeInsets.zero,
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
                         itemCount: categories.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 8),
                         itemBuilder: (ctx, idx) {
                           final catKey = categories[idx];
                           final quizzes = _appData!.questions[catKey] ?? [];
@@ -1298,14 +1589,15 @@ class _HomePageState extends State<HomePage> with RouteAware {
                             title: catKey,
                             questionCount: quizzes.length,
                             onTap: () => _startQuizByCategory(context, catKey),
-                            onInfo: () => _showCategoryInfoSheet(context, catKey),
+                            onInfo: () =>
+                                _showCategoryInfoSheet(context, catKey),
                           );
                         },
                       ),
                       const SizedBox(height: 8),
                       _buildBottomHomeActions(context, compact: isCompact),
                       const SizedBox(height: 8),
-                      if (_appData?.config.nextAppEnabled != false)
+                      if (false) // 姉妹アプリ一時非表示
                         ValueListenableBuilder<bool>(
                           valueListenable: PurchaseManager.instance.isPremium,
                           builder: (context, isPremium, _) {
@@ -1330,6 +1622,10 @@ class _HomePageState extends State<HomePage> with RouteAware {
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Category list item (縦並びリスト用)
+// ---------------------------------------------------------------------------
 
 class _CategoryListItem extends StatelessWidget {
   static const _colors = [
@@ -1364,6 +1660,7 @@ class _CategoryListItem extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.95),
@@ -1469,6 +1766,10 @@ class _InfoSheetRow extends StatelessWidget {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Category carousel card (旧デザイン — 非表示中)
+// ---------------------------------------------------------------------------
+
 class _CategoryCarouselCard extends StatelessWidget {
   final String title;
   final int questionCount;
@@ -1550,7 +1851,10 @@ class _CategoryCarouselCard extends StatelessWidget {
                 Align(
                   alignment: Alignment.centerLeft,
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(minWidth: 220, maxWidth: 320),
+                    constraints: const BoxConstraints(
+                      minWidth: 220,
+                      maxWidth: 320,
+                    ),
                     child: SizedBox(
                       height: compact ? 40 : 44,
                       width: double.infinity,
@@ -1605,18 +1909,30 @@ class _CategoryStatusPanel extends StatelessWidget {
     final trackColor = Colors.white.withValues(alpha: 0.95);
     final hasAnswered = answeredCount > 0;
     final headlineLabel = weaknessCount > 0 ? '要復習' : '問題数';
-    final headlineValue = weaknessCount > 0 ? '$weaknessCount問' : '$questionCount問';
-    final headlineColor = weaknessCount > 0 ? const Color(0xFFCC6A43) : AppColors.accent;
+    final headlineValue = weaknessCount > 0
+        ? '$weaknessCount問'
+        : '$questionCount問';
+    final headlineColor = weaknessCount > 0
+        ? const Color(0xFFCC6A43)
+        : AppColors.accent;
     final completionRate = questionCount == 0
         ? 0.0
-        : (math.min(answeredCount, questionCount) / questionCount).clamp(0.0, 1.0);
+        : (math.min(answeredCount, questionCount) / questionCount).clamp(
+            0.0,
+            1.0,
+          );
     final completionPercent = (completionRate * 100).round();
-    final barColor = weaknessCount > 0 ? const Color(0xFFCC6A43) : AppColors.accent;
+    final barColor = weaknessCount > 0
+        ? const Color(0xFFCC6A43)
+        : AppColors.accent;
     final barWidth = completionRate;
 
     return Container(
       padding: EdgeInsets.fromLTRB(
-        compact ? 12 : 14, compact ? 10 : 12, compact ? 12 : 14, compact ? 9 : 11,
+        compact ? 12 : 14,
+        compact ? 10 : 12,
+        compact ? 12 : 14,
+        compact ? 9 : 11,
       ),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
@@ -1634,7 +1950,14 @@ class _CategoryStatusPanel extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(headlineLabel, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: labelColor)),
+              Text(
+                headlineLabel,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: labelColor,
+                ),
+              ),
               const SizedBox(width: 10),
               Text(
                 headlineValue,
@@ -1652,7 +1975,11 @@ class _CategoryStatusPanel extends StatelessWidget {
             children: [
               const Text(
                 '進捗',
-                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: labelColor),
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                  color: labelColor,
+                ),
               ),
               const Spacer(),
               Text(
@@ -1665,8 +1992,8 @@ class _CategoryStatusPanel extends StatelessWidget {
                   color: completionRate >= 1.0
                       ? const Color(0xFF4CAF50)
                       : weaknessCount > 0
-                          ? headlineColor
-                          : AppColors.accent,
+                      ? headlineColor
+                      : AppColors.accent,
                 ),
               ),
             ],
@@ -1734,7 +2061,12 @@ class _CategoryStatusMetric extends StatelessWidget {
   final Color labelColor;
   final Color valueColor;
 
-  const _CategoryStatusMetric({required this.label, required this.value, required this.labelColor, required this.valueColor});
+  const _CategoryStatusMetric({
+    required this.label,
+    required this.value,
+    required this.labelColor,
+    required this.valueColor,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1742,9 +2074,24 @@ class _CategoryStatusMetric extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: labelColor)),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: labelColor,
+          ),
+        ),
         const SizedBox(height: 4),
-        Text(value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: valueColor, height: 1)),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w900,
+            color: valueColor,
+            height: 1,
+          ),
+        ),
       ],
     );
   }
@@ -1756,13 +2103,14 @@ class _CategoryStatusDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(width: 1, height: 30, margin: const EdgeInsets.symmetric(horizontal: 10), color: color);
+    return Container(
+      width: 1,
+      height: 30,
+      margin: const EdgeInsets.symmetric(horizontal: 10),
+      color: color,
+    );
   }
 }
-
-
-
-
 
 class _HomeStatCard extends StatelessWidget {
   final IconData icon;
@@ -1807,14 +2155,26 @@ class _HomeStatCard extends StatelessWidget {
                 Icon(icon, size: 14, color: iconColor),
                 const SizedBox(width: 5),
                 Expanded(
-                  child: Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: labelColor)),
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: labelColor,
+                    ),
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
               value,
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: valueColor, height: 1),
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.w900,
+                color: valueColor,
+                height: 1,
+              ),
             ),
           ],
         ),
@@ -1837,7 +2197,10 @@ class _StatsBarChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final maxValue = points.fold<int>(0, (max, p) => p.value > max ? p.value : max);
+    final maxValue = points.fold<int>(
+      0,
+      (max, p) => p.value > max ? p.value : max,
+    );
     final safeMax = maxValue == 0 ? 1 : maxValue;
 
     return SizedBox(
@@ -1910,6 +2273,7 @@ class QuizPage extends StatefulWidget {
   final String? categoryKey;
   final bool isWeaknessReview;
   final int totalQuestions;
+  final bool showAnswerExplanation;
 
   const QuizPage({
     super.key,
@@ -1917,6 +2281,7 @@ class QuizPage extends StatefulWidget {
     this.categoryKey,
     this.isWeaknessReview = false,
     required this.totalQuestions,
+    required this.showAnswerExplanation,
   });
 
   @override
@@ -1925,7 +2290,7 @@ class QuizPage extends StatefulWidget {
 
 class _QuizPageState extends State<QuizPage> {
   final AppinioSwiperController controller = AppinioSwiperController();
-  
+
   int _score = 0;
   int _currentIndex = 1;
   final List<Quiz> _incorrectQuizzes = [];
@@ -1935,6 +2300,10 @@ class _QuizPageState extends State<QuizPage> {
   int _bestCorrectStreak = 0;
   Color _backgroundColor = Colors.transparent;
   bool _showTutorial = false;
+  _AnswerFeedbackData? _answerFeedback;
+  bool _shouldFinishAfterFeedback = false;
+  double _feedbackExitDirection = 0;
+  bool _isFeedbackExiting = false;
 
   @override
   void initState() {
@@ -1958,16 +2327,17 @@ class _QuizPageState extends State<QuizPage> {
     PrefsHelper.markTutorialShown();
   }
 
-  void _handleSwipeEnd(int previousIndex, int targetIndex, SwiperActivity activity) {
+  void _handleSwipeEnd(
+    int previousIndex,
+    int targetIndex,
+    SwiperActivity activity,
+  ) {
     if (activity is Swipe) {
       final quiz = widget.quizzes[previousIndex];
       bool userVal = (activity.direction == AxisDirection.right);
       bool isCorrect = (userVal == quiz.isCorrect);
 
-      _answerHistory.add({
-        'quiz': quiz,
-        'result': isCorrect,
-      });
+      _answerHistory.add({'quiz': quiz, 'result': isCorrect});
 
       setState(() {
         if (isCorrect) {
@@ -1999,28 +2369,42 @@ class _QuizPageState extends State<QuizPage> {
         }
       });
 
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.clearSnackBars();
-      messenger.showSnackBar(
-        SnackBar(
-          duration: const Duration(milliseconds: 600),
-          content: Text(
-            isCorrect ? "正解！ ⭕" : "不正解... ❌",
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: ResponsiveHelper.respFontSize(context, 18),
-              fontWeight: FontWeight.bold,
+      final isLastQuestion = previousIndex == widget.quizzes.length - 1;
+
+      if (widget.showAnswerExplanation) {
+        setState(() {
+          _answerFeedback = _AnswerFeedbackData(
+            quiz: quiz,
+            isCorrect: isCorrect,
+          );
+          _shouldFinishAfterFeedback = isLastQuestion;
+          _feedbackExitDirection = 0;
+          _isFeedbackExiting = false;
+        });
+      } else {
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.clearSnackBars();
+        messenger.showSnackBar(
+          SnackBar(
+            duration: const Duration(milliseconds: 600),
+            content: Text(
+              isCorrect ? "正解！ ⭕" : "不正解... ❌",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: ResponsiveHelper.respFontSize(context, 18),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            backgroundColor: isCorrect ? Colors.green : Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+            margin: EdgeInsets.only(
+              bottom: MediaQuery.of(context).size.height * 0.5,
+              left: ResponsiveHelper.respPadding(context, 50),
+              right: ResponsiveHelper.respPadding(context, 50),
             ),
           ),
-          backgroundColor: isCorrect ? Colors.green : Colors.redAccent,
-          behavior: SnackBarBehavior.floating,
-          margin: EdgeInsets.only(
-            bottom: MediaQuery.of(context).size.height * 0.5,
-            left: ResponsiveHelper.respPadding(context, 50),
-            right: ResponsiveHelper.respPadding(context, 50),
-          ),
-        ),
-      );
+        );
+      }
 
       setState(() {
         if (_currentIndex < widget.totalQuestions) {
@@ -2028,19 +2412,26 @@ class _QuizPageState extends State<QuizPage> {
         }
       });
 
-      if (previousIndex == widget.quizzes.length - 1) {
+      if (isLastQuestion && !widget.showAnswerExplanation) {
         _finishQuiz();
       }
     }
   }
 
   Future<void> _finishQuiz() async {
-    // Wait for last snackbar to finish before navigating
-    await Future.delayed(const Duration(milliseconds: 700));
+    if (!widget.showAnswerExplanation) {
+      await Future.delayed(const Duration(milliseconds: 700));
+    }
 
     if (widget.categoryKey != null) {
-      await PrefsHelper.saveHighScore('highscore_${widget.categoryKey!}', _score);
-      await PrefsHelper.addCategoryAnsweredCount(widget.categoryKey!, widget.quizzes.length);
+      await PrefsHelper.saveHighScore(
+        'highscore_${widget.categoryKey!}',
+        _score,
+      );
+      await PrefsHelper.addCategoryAnsweredCount(
+        widget.categoryKey!,
+        widget.quizzes.length,
+      );
       await PrefsHelper.addCategoryCorrectCount(widget.categoryKey!, _score);
     }
     await PrefsHelper.addAnsweredCount(widget.quizzes.length);
@@ -2063,19 +2454,22 @@ class _QuizPageState extends State<QuizPage> {
     }
 
     if (widget.isWeaknessReview && _correctQuizzesInReview.isNotEmpty) {
-      final correctTexts = _correctQuizzesInReview.map((q) => q.question).toList();
+      final correctTexts = _correctQuizzesInReview
+          .map((q) => q.question)
+          .toList();
       await PrefsHelper.removeWeakQuestions(correctTexts);
     }
-    
+
     if (mounted) {
       final shouldShow = await PrefsHelper.shouldShowInterstitial();
-      
+
       if (shouldShow) {
         AdManager.instance.showInterstitial(
           onComplete: () async {
             if (mounted) {
               // After interstitial, check for special offer
-              final showOffer = await PurchaseManager.instance.shouldShowSpecialOffer();
+              final showOffer = await PurchaseManager.instance
+                  .shouldShowSpecialOffer();
               if (showOffer && mounted) {
                 await PurchaseManager.instance.markSpecialOfferAsShown();
                 if (!mounted) return;
@@ -2117,152 +2511,246 @@ class _QuizPageState extends State<QuizPage> {
           originalQuizzes: widget.quizzes,
           categoryKey: widget.categoryKey,
           isWeaknessReview: widget.isWeaknessReview,
+          showAnswerExplanation: widget.showAnswerExplanation,
         ),
       ),
     );
   }
 
+  Future<void> _continueAfterAnswerFeedback([double? exitDirection]) async {
+    final shouldFinish = _shouldFinishAfterFeedback;
+    final resolvedDirection =
+        exitDirection ?? ((_answerFeedback?.isCorrect ?? true) ? 1 : -1);
+    setState(() {
+      _feedbackExitDirection = resolvedDirection;
+      _isFeedbackExiting = true;
+    });
+    await Future.delayed(const Duration(milliseconds: 320));
+    if (!mounted) return;
+    setState(() {
+      _answerFeedback = null;
+      _shouldFinishAfterFeedback = false;
+      _feedbackExitDirection = 0;
+      _isFeedbackExiting = false;
+    });
+    if (shouldFinish) {
+      _finishQuiz();
+    }
+  }
+
+  void _undoLastAnswer() {
+    controller.unswipe();
+    setState(() {
+      _answerFeedback = null;
+      _shouldFinishAfterFeedback = false;
+      if (_currentIndex > 1) {
+        _currentIndex--;
+      }
+      if (_answerHistory.isNotEmpty) {
+        final last = _answerHistory.removeLast();
+        final bool wasCorrect = last['result'];
+        final Quiz quiz = last['quiz'];
+
+        if (wasCorrect) {
+          _score--;
+          if (widget.isWeaknessReview) {
+            _correctQuizzesInReview.remove(quiz);
+          }
+        } else {
+          _incorrectQuizzes.remove(quiz);
+        }
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.dark,
       child: Scaffold(
-      body: Stack(
-        children: [
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [AppColors.backgroundTop, AppColors.backgroundBottom],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
+        body: Stack(
+          children: [
+            Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [AppColors.backgroundTop, AppColors.backgroundBottom],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
               ),
             ),
-          ),
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            color: _backgroundColor,
-            child: SafeArea(
-              child: Column(
-                children: [
-                  // Custom Header Row
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(4, ResponsiveHelper.isTablet(context) ? 24 : 8, 24, 8),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.chevron_left_rounded, color: Colors.black54, size: 40),
-                          onPressed: () => Navigator.of(context).pop(),
-                          iconSize: 40,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                        ),
-                        Expanded(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: LinearProgressIndicator(
-                              value: _currentIndex / widget.totalQuestions,
-                              minHeight: 8,
-                              backgroundColor: Colors.grey[300],
-                              valueColor: const AlwaysStoppedAnimation<Color>(Colors.orange),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              color: _backgroundColor,
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    // Custom Header Row
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        4,
+                        ResponsiveHelper.isTablet(context) ? 24 : 8,
+                        24,
+                        8,
+                      ),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(
+                              Icons.chevron_left_rounded,
+                              color: Colors.black54,
+                              size: 40,
+                            ),
+                            onPressed: () => Navigator.of(context).pop(),
+                            iconSize: 40,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                          Expanded(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: _currentIndex / widget.totalQuestions,
+                                minHeight: 8,
+                                backgroundColor: Colors.grey[300],
+                                valueColor: const AlwaysStoppedAnimation<Color>(
+                                  Color(0xFF2F5D8C),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 16),
-                        Text(
-                          "$_currentIndex / ${widget.totalQuestions}",
-                          style: TextStyle(
-                            fontSize: ResponsiveHelper.respFontSize(context, 14),
-                            color: Colors.grey,
-                            fontWeight: FontWeight.bold,
+                          const SizedBox(width: 16),
+                          Text(
+                            "$_currentIndex / ${widget.totalQuestions}",
+                            style: TextStyle(
+                              fontSize: ResponsiveHelper.respFontSize(
+                                context,
+                                14,
+                              ),
+                              color: Colors.grey,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
-                      child: AppinioSwiper(
-                        controller: controller,
-                        cardCount: widget.quizzes.length,
-                        loop: false,
-                        backgroundCardCount: 2,
-                        swipeOptions: const SwipeOptions.symmetric(horizontal: true, vertical: false),
-                        onSwipeEnd: _handleSwipeEnd,
-                        cardBuilder: (context, index) {
-                          return _buildCard(widget.quizzes[index]);
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 6,
+                            ),
+                            child: IgnorePointer(
+                              ignoring: _answerFeedback != null,
+                              child: AppinioSwiper(
+                                controller: controller,
+                                cardCount: widget.quizzes.length,
+                                loop: false,
+                                backgroundCardCount: 2,
+                                swipeOptions: const SwipeOptions.symmetric(
+                                  horizontal: true,
+                                  vertical: false,
+                                ),
+                                onSwipeEnd: _handleSwipeEnd,
+                                cardBuilder: (context, index) {
+                                  return _buildCard(widget.quizzes[index]);
+                                },
+                              ),
+                            ),
+                          ),
+                          if (_answerFeedback != null)
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                ignoring: false,
+                                child: Align(
+                                  alignment: Alignment.bottomCenter,
+                                  child: Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      40,
+                                      0,
+                                      40,
+                                      72,
+                                    ),
+                                    child: ConstrainedBox(
+                                      constraints: BoxConstraints(
+                                        maxWidth:
+                                            (ResponsiveHelper.respCardWidth(
+                                                  context,
+                                                ) ??
+                                                double.infinity) -
+                                            48,
+                                      ),
+                                      child: _AnswerFeedbackSheet(
+                                        feedback: _answerFeedback!,
+                                        isLastQuestion:
+                                            _shouldFinishAfterFeedback,
+                                        exitDirection: _feedbackExitDirection,
+                                        isExiting: _isFeedbackExiting,
+                                        onContinue:
+                                            _continueAfterAnswerFeedback,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.only(top: 18, bottom: 10),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 52,
+                            height: 52,
+                            child: ElevatedButton(
+                              onPressed: _undoLastAnswer,
+                              style: ElevatedButton.styleFrom(
+                                padding: EdgeInsets.zero,
+                                backgroundColor: Colors.white,
+                                foregroundColor: Colors.black87,
+                                elevation: 2,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(26),
+                                ),
+                              ),
+                              child: const Icon(Icons.undo_rounded, size: 24),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Ad Banner for Quiz
+                    SafeArea(
+                      top: false,
+                      child: ValueListenableBuilder<bool>(
+                        valueListenable: PurchaseManager.instance.isPremium,
+                        builder: (context, isPremium, child) {
+                          if (isPremium) return const SizedBox.shrink();
+                          return const SizedBox(
+                            height: 60,
+                            child: AdBanner(adKey: 'quiz', keepAlive: true),
+                          );
                         },
                       ),
                     ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.only(bottom: 40, top: 20),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            controller.unswipe();
-                            setState(() {
-                              if (_currentIndex > 1) {
-                                _currentIndex--;
-                              }
-                              if (_answerHistory.isNotEmpty) {
-                                final last = _answerHistory.removeLast();
-                                final bool wasCorrect = last['result'];
-                                final Quiz quiz = last['quiz'];
-
-                                if (wasCorrect) {
-                                  _score--;
-                                  if (widget.isWeaknessReview) {
-                                    _correctQuizzesInReview.remove(quiz);
-                                  }
-                                } else {
-                                  _incorrectQuizzes.remove(quiz);
-                                }
-                              }
-                            });
-                          },
-                          icon: const Icon(Icons.undo),
-                          label: Text(l10n.back),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.black87,
-                            elevation: 2,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Ad Banner for Quiz
-                  SafeArea(
-                    top: false,
-                    child: ValueListenableBuilder<bool>(
-                      valueListenable: PurchaseManager.instance.isPremium,
-                      builder: (context, isPremium, child) {
-                        if (isPremium) return const SizedBox.shrink();
-                        return const SizedBox(
-                          height: 60,
-                          child: AdBanner(adKey: 'quiz', keepAlive: true),
-                        );
-                      },
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          if (_showTutorial)
-            Positioned.fill(
-              child: TutorialOverlay(onDismiss: _dismissTutorial),
-            ),
-        ],
+            if (_showTutorial)
+              Positioned.fill(
+                child: TutorialOverlay(onDismiss: _dismissTutorial),
+              ),
+          ],
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   Widget _buildCard(Quiz quiz) {
     bool hasImage = quiz.imagePath != null;
@@ -2271,122 +2759,317 @@ class _QuizPageState extends State<QuizPage> {
       child: Center(
         child: ConstrainedBox(
           constraints: BoxConstraints(
-            maxWidth: ResponsiveHelper.respCardWidth(context) ?? double.infinity,
+            maxWidth:
+                ResponsiveHelper.respCardWidth(context) ?? double.infinity,
           ),
           child: Container(
-      margin: const EdgeInsets.all(20),
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      alignment: Alignment.center,
-      child: Column(
-        children: [
-          if (hasImage) 
-            Expanded(
-              flex: 4,
-              child: Container(
-                width: double.infinity,
-                color: Colors.grey[200],
-                child: Image.asset(
-                  quiz.imagePath!,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) {
-                    return Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.image_not_supported, size: 50, color: Colors.grey),
-                        const SizedBox(height: 8),
-                        Text("Image not found", style: TextStyle(color: Colors.grey[600])),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            ),
-
-          Expanded(
-            flex: 5,
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.start,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    "Q.",
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blueGrey,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 20),
-                  Expanded(
-                    child: AutoSizeText(
-                      quiz.question,
-                      style: TextStyle(
-                        fontSize: hasImage ? 18 : 22,
-                        fontWeight: FontWeight.bold,
-                        height: 1.3,
-                        color: Colors.black87,
-                      ),
-                      textAlign: TextAlign.left,
-                      minFontSize: 12,
-                      stepGranularity: 1,
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 20,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          
-          Padding(
-            padding: const EdgeInsets.only(left: 40.0, right: 40.0, bottom: 40.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                GestureDetector(
-                  onTap: () => controller.swipeLeft(),
-                  child: const Column(
-                    children: [
-                      Icon(Icons.close, color: Colors.redAccent, size: 48),
-                      Text("誤り", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                ),
-                GestureDetector(
-                  onTap: () => controller.swipeRight(),
-                  child: const Column(
-                    children: [
-                      Icon(Icons.circle_outlined, color: Colors.green, size: 48),
-                      Text("正しい", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
-                    ],
-                  ),
+            margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.08),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
+            alignment: Alignment.center,
+            child: Column(
+              children: [
+                if (hasImage)
+                  Expanded(
+                    flex: 4,
+                    child: Container(
+                      width: double.infinity,
+                      color: Colors.grey[200],
+                      child: Image.asset(
+                        quiz.imagePath!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(
+                                Icons.image_not_supported,
+                                size: 50,
+                                color: Colors.grey,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                "Image not found",
+                                style: TextStyle(color: Colors.grey[600]),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+
+                Expanded(
+                  flex: 5,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(26, 24, 26, 12),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text(
+                          "Q.",
+                          style: TextStyle(
+                            fontSize: 34,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blueGrey,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 16),
+                        Expanded(
+                          child: AutoSizeText(
+                            quiz.question,
+                            style: TextStyle(
+                              fontSize: hasImage ? 20 : 26,
+                              fontWeight: FontWeight.bold,
+                              height: 1.42,
+                              color: Colors.black87,
+                            ),
+                            textAlign: TextAlign.left,
+                            minFontSize: 14,
+                            stepGranularity: 1,
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 18,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                Padding(
+                  padding: const EdgeInsets.only(
+                    left: 44,
+                    right: 44,
+                    bottom: 28,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      GestureDetector(
+                        onTap: () => controller.swipeLeft(),
+                        child: const Column(
+                          children: [
+                            Icon(
+                              Icons.close,
+                              color: Colors.redAccent,
+                              size: 56,
+                            ),
+                          ],
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => controller.swipeRight(),
+                        child: const Column(
+                          children: [
+                            Icon(
+                              Icons.circle_outlined,
+                              color: Colors.green,
+                              size: 56,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (hasImage) const SizedBox(height: 10),
+              ],
+            ),
           ),
-          if (hasImage) const SizedBox(height: 10),
-        ],
-      ),
-     ),
         ),
       ),
     );
   }
+}
 
+class _AnswerFeedbackData {
+  final Quiz quiz;
+  final bool isCorrect;
+
+  const _AnswerFeedbackData({required this.quiz, required this.isCorrect});
+}
+
+class _AnswerFeedbackSheet extends StatelessWidget {
+  final _AnswerFeedbackData feedback;
+  final bool isLastQuestion;
+  final ValueChanged<double> onContinue;
+  final double exitDirection;
+  final bool isExiting;
+
+  const _AnswerFeedbackSheet({
+    required this.feedback,
+    required this.isLastQuestion,
+    required this.onContinue,
+    required this.exitDirection,
+    required this.isExiting,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = feedback.isCorrect
+        ? AppColors.success
+        : AppColors.error;
+    final fillColor = feedback.isCorrect
+        ? const Color(0xFFF2FBF5)
+        : const Color(0xFFFFF4F4);
+    final label = feedback.isCorrect ? '正解' : '不正解';
+    final buttonLabel = isLastQuestion ? '結果を見る' : '次へ';
+
+    return TweenAnimationBuilder<Offset>(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      tween: Tween(begin: const Offset(0, 0.18), end: Offset.zero),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragEnd: (details) {
+          if (isExiting) return;
+          final velocity = details.primaryVelocity ?? 0;
+          if (velocity.abs() > 120) {
+            onContinue(velocity < 0 ? -1 : 1);
+          }
+        },
+        child: Material(
+          color: Colors.transparent,
+          child: SoftSurface(
+            borderRadius: BorderRadius.circular(22),
+            borderColor: accentColor.withValues(alpha: 0.26),
+            fillColor: fillColor,
+            boxShadow: [
+              BoxShadow(
+                color: accentColor.withValues(alpha: 0.10),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+              BoxShadow(
+                color: const Color(0xFF21314D).withValues(alpha: 0.06),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 228, maxHeight: 270),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: accentColor.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                feedback.isCorrect
+                                    ? Icons.check_circle_rounded
+                                    : Icons.cancel_rounded,
+                                size: 16,
+                                color: accentColor,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                label,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w900,
+                                  color: accentColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: Text(
+                        feedback.quiz.explanation,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.ink,
+                          height: 1.55,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: Row(
+                        children: [
+                          const Spacer(),
+                          SizedBox(
+                            height: 42,
+                            child: ElevatedButton(
+                              onPressed: () =>
+                                  onContinue(feedback.isCorrect ? 1 : -1),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: accentColor,
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                textStyle: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              child: Text(buttonLabel),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      builder: (context, offset, child) {
+        return AnimatedOpacity(
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeOutCubic,
+          opacity: isExiting ? 0 : (1 - offset.dy * 1.6).clamp(0.0, 1.0),
+          child: AnimatedRotation(
+            duration: const Duration(milliseconds: 320),
+            curve: Curves.easeOutCubic,
+            turns: isExiting ? 0.024 * exitDirection : 0,
+            child: AnimatedSlide(
+              duration: const Duration(milliseconds: 320),
+              curve: Curves.easeOutCubic,
+              offset: isExiting
+                  ? Offset(1.08 * exitDirection, -0.02)
+                  : Offset(0, offset.dy),
+              child: child,
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _CollapsingResultSummary extends StatelessWidget {
@@ -2419,7 +3102,8 @@ class _CollapsingResultSummary extends StatelessWidget {
         child: ConstrainedBox(
           constraints: BoxConstraints(
             minWidth: double.infinity,
-            maxWidth: ResponsiveHelper.respCardWidth(context) ?? double.infinity,
+            maxWidth:
+                ResponsiveHelper.respCardWidth(context) ?? double.infinity,
           ),
           child: SoftSurface(
             borderRadius: BorderRadius.circular(borderRadius),
@@ -2427,63 +3111,66 @@ class _CollapsingResultSummary extends StatelessWidget {
             fillColor: Colors.white.withValues(alpha: 0.98),
             child: ClipRect(
               child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: horizontalPadding,
-                vertical: verticalPadding,
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        '正解数',
-                        style: TextStyle(
-                          fontSize: labelFont,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.inkMuted,
+                padding: EdgeInsets.symmetric(
+                  horizontal: horizontalPadding,
+                  vertical: verticalPadding,
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '正解数',
+                          style: TextStyle(
+                            fontSize: labelFont,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.inkMuted,
+                          ),
                         ),
-                      ),
-                      SizedBox(width: lerpDouble(10, 8, collapseProgress)!),
-                      Text(
-                        '$score/$total',
-                        style: TextStyle(
-                          fontSize: ResponsiveHelper.respFontSize(context, scoreFont),
-                          fontWeight: FontWeight.w900,
-                          color: AppColors.warning,
-                          letterSpacing: -1,
-                          height: 1,
+                        SizedBox(width: lerpDouble(10, 8, collapseProgress)!),
+                        Text(
+                          '$score/$total',
+                          style: TextStyle(
+                            fontSize: ResponsiveHelper.respFontSize(
+                              context,
+                              scoreFont,
+                            ),
+                            fontWeight: FontWeight.w900,
+                            color: AppColors.warning,
+                            letterSpacing: -1,
+                            height: 1,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (collapseProgress < 0.5) ...[
+                      SizedBox(height: lerpDouble(10, 4, collapseProgress)!),
+                      Opacity(
+                        opacity: messageOpacity,
+                        child: Text(
+                          message,
+                          maxLines: 1,
+                          overflow: TextOverflow.fade,
+                          softWrap: false,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: score == total
+                                ? AppColors.success
+                                : score >= 8
+                                ? AppColors.success
+                                : AppColors.error,
+                          ),
                         ),
                       ),
                     ],
-                  ),
-                  if (collapseProgress < 0.5) ...[
-                    SizedBox(height: lerpDouble(10, 4, collapseProgress)!),
-                    Opacity(
-                      opacity: messageOpacity,
-                      child: Text(
-                        message,
-                        maxLines: 1,
-                        overflow: TextOverflow.fade,
-                        softWrap: false,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          color: score == total
-                              ? AppColors.success
-                              : score / total >= 0.8
-                                  ? AppColors.success
-                                  : AppColors.error,
-                        ),
-                      ),
-                    ),
                   ],
-                ],
+                ),
               ),
-            ),
             ),
           ),
         ),
@@ -2496,17 +3183,29 @@ class _SettingsSheet extends StatefulWidget {
   final int dailyGoal;
   final bool notifEnabled;
   final int notifHour;
+  final bool showAnswerExplanation;
   final DateTime? examDate;
   final int streak;
-  final void Function({int? goal, bool? notifEnabled, int? notifHour}) onChanged;
+  final String feedbackUrl;
+  final String appTitle;
+  final void Function({
+    int? goal,
+    bool? notifEnabled,
+    int? notifHour,
+    bool? showAnswerExplanation,
+  })
+  onChanged;
   final void Function(DateTime?) onExamDateChanged;
 
   const _SettingsSheet({
     required this.dailyGoal,
     required this.notifEnabled,
     required this.notifHour,
+    required this.showAnswerExplanation,
     required this.examDate,
     required this.streak,
+    this.feedbackUrl = '',
+    this.appTitle = '',
     required this.onChanged,
     required this.onExamDateChanged,
   });
@@ -2519,6 +3218,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   late int _goal;
   late bool _notifEnabled;
   late int _notifHour;
+  late bool _showAnswerExplanation;
   late DateTime? _examDate;
 
   static const _goalOptions = [10, 20, 30, 50, 70, 100];
@@ -2529,6 +3229,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     _goal = widget.dailyGoal;
     _notifEnabled = widget.notifEnabled;
     _notifHour = widget.notifHour;
+    _showAnswerExplanation = widget.showAnswerExplanation;
     _examDate = widget.examDate;
   }
 
@@ -2586,7 +3287,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           children: [
             Center(
               child: Container(
-                width: 44, height: 5,
+                width: 44,
+                height: 5,
                 decoration: BoxDecoration(
                   color: AppColors.line,
                   borderRadius: BorderRadius.circular(999),
@@ -2596,28 +3298,45 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             const SizedBox(height: 20),
             const Text(
               '設定',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: AppColors.ink),
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+                color: AppColors.ink,
+              ),
             ),
             const SizedBox(height: 20),
 
             // Exam Date
             const Text(
               '試験日',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.inkMuted),
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: AppColors.inkMuted,
+              ),
             ),
             const SizedBox(height: 10),
             GestureDetector(
               onTap: _pickExamDate,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.line.withValues(alpha: 0.7)),
+                  border: Border.all(
+                    color: AppColors.line.withValues(alpha: 0.7),
+                  ),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.calendar_month_rounded, size: 18, color: AppColors.inkMuted),
+                    const Icon(
+                      Icons.calendar_month_rounded,
+                      size: 18,
+                      color: AppColors.inkMuted,
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
@@ -2627,7 +3346,9 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
-                          color: _examDate != null ? AppColors.ink : AppColors.inkMuted,
+                          color: _examDate != null
+                              ? AppColors.ink
+                              : AppColors.inkMuted,
                         ),
                       ),
                     ),
@@ -2636,10 +3357,18 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                         onTap: _clearExamDate,
                         child: const Padding(
                           padding: EdgeInsets.only(right: 8),
-                          child: Icon(Icons.close_rounded, size: 18, color: AppColors.inkMuted),
+                          child: Icon(
+                            Icons.close_rounded,
+                            size: 18,
+                            color: AppColors.inkMuted,
+                          ),
                         ),
                       ),
-                    const Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.inkMuted),
+                    const Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: AppColors.inkMuted,
+                    ),
                   ],
                 ),
               ),
@@ -2652,7 +3381,11 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             // Daily Goal
             const Text(
               '今日の目標',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.inkMuted),
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: AppColors.inkMuted,
+              ),
             ),
             const SizedBox(height: 10),
             Row(
@@ -2709,10 +3442,101 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             Container(height: 1, color: AppColors.line.withValues(alpha: 0.5)),
             const SizedBox(height: 20),
 
+            const Text(
+              '学習スタイル',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: AppColors.inkMuted,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: AppColors.line.withValues(alpha: 0.7),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '解説の表示タイミング',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.ink,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF3F6FB),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: AppColors.line.withValues(alpha: 0.7),
+                            ),
+                          ),
+                          padding: const EdgeInsets.all(4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: _buildReviewModeOption(
+                                  label: '1問ごと確認',
+                                  selected: _showAnswerExplanation,
+                                  onTap: () {
+                                    setState(
+                                      () => _showAnswerExplanation = true,
+                                    );
+                                    widget.onChanged(
+                                      showAnswerExplanation: true,
+                                    );
+                                  },
+                                ),
+                              ),
+                              Expanded(
+                                child: _buildReviewModeOption(
+                                  label: '最後にまとめて',
+                                  selected: !_showAnswerExplanation,
+                                  onTap: () {
+                                    setState(
+                                      () => _showAnswerExplanation = false,
+                                    );
+                                    widget.onChanged(
+                                      showAnswerExplanation: false,
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 24),
+            Container(height: 1, color: AppColors.line.withValues(alpha: 0.5)),
+            const SizedBox(height: 20),
+
             // Notification
             const Text(
               '学習リマインダー',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.inkMuted),
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: AppColors.inkMuted,
+              ),
             ),
             const SizedBox(height: 12),
             Container(
@@ -2720,24 +3544,35 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppColors.line.withValues(alpha: 0.7)),
+                border: Border.all(
+                  color: AppColors.line.withValues(alpha: 0.7),
+                ),
               ),
               child: Column(
                 children: [
                   // ON/OFF
                   Row(
                     children: [
-                      const Icon(Icons.notifications_rounded, size: 18, color: AppColors.inkMuted),
+                      const Icon(
+                        Icons.notifications_rounded,
+                        size: 18,
+                        color: AppColors.inkMuted,
+                      ),
                       const SizedBox(width: 12),
                       const Expanded(
                         child: Text(
                           '通知',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.ink),
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.ink,
+                          ),
                         ),
                       ),
                       Switch.adaptive(
                         value: _notifEnabled,
-                        activeColor: AppColors.accent,
+                        activeTrackColor: AppColors.accent,
+                        activeThumbColor: Colors.white,
                         onChanged: (v) {
                           setState(() => _notifEnabled = v);
                           widget.onChanged(notifEnabled: v);
@@ -2746,7 +3581,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     ],
                   ),
                   if (_notifEnabled) ...[
-                    Divider(height: 1, color: AppColors.line.withValues(alpha: 0.5)),
+                    Divider(
+                      height: 1,
+                      color: AppColors.line.withValues(alpha: 0.5),
+                    ),
                     // Time
                     GestureDetector(
                       onTap: _pickTime,
@@ -2754,12 +3592,20 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         child: Row(
                           children: [
-                            const Icon(Icons.access_time_rounded, size: 18, color: AppColors.inkMuted),
+                            const Icon(
+                              Icons.access_time_rounded,
+                              size: 18,
+                              color: AppColors.inkMuted,
+                            ),
                             const SizedBox(width: 12),
                             const Expanded(
                               child: Text(
                                 '通知時間',
-                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.ink),
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.ink,
+                                ),
                               ),
                             ),
                             Text(
@@ -2771,7 +3617,11 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                               ),
                             ),
                             const SizedBox(width: 4),
-                            const Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.inkMuted),
+                            const Icon(
+                              Icons.chevron_right_rounded,
+                              size: 18,
+                              color: AppColors.inkMuted,
+                            ),
                           ],
                         ),
                       ),
@@ -2780,7 +3630,122 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 ],
               ),
             ),
+
+            if (widget.feedbackUrl.isNotEmpty) ...[
+              const SizedBox(height: 24),
+              Container(
+                height: 1,
+                color: AppColors.line.withValues(alpha: 0.5),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'サポート',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.inkMuted,
+                ),
+              ),
+              const SizedBox(height: 10),
+              GestureDetector(
+                onTap: () async {
+                  final prefill = Uri.encodeComponent('【${widget.appTitle}】');
+                  final uri = Uri.parse(
+                    '${widget.feedbackUrl}?usp=pp_url&entry.1780917331=$prefill',
+                  );
+                  if (!await launchUrl(
+                    uri,
+                    mode: LaunchMode.externalApplication,
+                  )) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('フォームを開けませんでした')),
+                      );
+                    }
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: AppColors.line.withValues(alpha: 0.7),
+                    ),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(
+                        Icons.flag_rounded,
+                        size: 18,
+                        color: AppColors.inkMuted,
+                      ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          '問題の誤り・ご要望',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.ink,
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        size: 18,
+                        color: AppColors.inkMuted,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReviewModeOption({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.accent : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected
+                ? AppColors.accent
+                : AppColors.line.withValues(alpha: 0.65),
+          ),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: AppColors.accent.withValues(alpha: 0.20),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ]
+              : null,
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            color: selected ? Colors.white : AppColors.ink,
+          ),
         ),
       ),
     );
@@ -2797,7 +3762,8 @@ class _ExamDateOnboardingSheet extends StatefulWidget {
   });
 
   @override
-  State<_ExamDateOnboardingSheet> createState() => _ExamDateOnboardingSheetState();
+  State<_ExamDateOnboardingSheet> createState() =>
+      _ExamDateOnboardingSheetState();
 }
 
 class _ExamDateOnboardingSheetState extends State<_ExamDateOnboardingSheet> {
@@ -2857,18 +3823,29 @@ class _ExamDateOnboardingSheetState extends State<_ExamDateOnboardingSheet> {
             const SizedBox(height: 24),
             const Text(
               '試験日を設定',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: AppColors.ink),
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+                color: AppColors.ink,
+              ),
             ),
             const SizedBox(height: 8),
             const Text(
               '試験日までの日数が表示されます。',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.inkSoft),
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.inkSoft,
+              ),
             ),
             const SizedBox(height: 24),
             GestureDetector(
               onTap: _pickDate,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 16,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
@@ -2882,7 +3859,9 @@ class _ExamDateOnboardingSheetState extends State<_ExamDateOnboardingSheet> {
                   children: [
                     Icon(
                       Icons.calendar_month_rounded,
-                      color: _selected != null ? AppColors.accent : AppColors.inkMuted,
+                      color: _selected != null
+                          ? AppColors.accent
+                          : AppColors.inkMuted,
                     ),
                     const SizedBox(width: 12),
                     Text(
@@ -2890,11 +3869,16 @@ class _ExamDateOnboardingSheetState extends State<_ExamDateOnboardingSheet> {
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
-                        color: _selected != null ? AppColors.ink : AppColors.inkMuted,
+                        color: _selected != null
+                            ? AppColors.ink
+                            : AppColors.inkMuted,
                       ),
                     ),
                     const Spacer(),
-                    Icon(Icons.chevron_right_rounded, color: AppColors.inkMuted),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: AppColors.inkMuted,
+                    ),
                   ],
                 ),
               ),
@@ -2927,8 +3911,12 @@ class _ExamDateOnboardingSheetState extends State<_ExamDateOnboardingSheet> {
                 onPressed: () => Navigator.of(context).pop(),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.inkSoft,
-                  side: BorderSide(color: AppColors.line.withValues(alpha: 0.9)),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  side: BorderSide(
+                    color: AppColors.line.withValues(alpha: 0.9),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                 ),
                 child: const Text(
                   'あとで設定する',
@@ -2950,19 +3938,21 @@ class _SisterAppPromotion extends StatelessWidget {
   Future<void> _launchURL(BuildContext context) async {
     final l10n = AppLocalizations.of(context)!;
     String urlString = config?.nextAppUrl ?? '6758681333';
-    
+
     // If urlString is purely numeric, treat it as an Apple App ID
     if (RegExp(r'^\d+$').hasMatch(urlString)) {
       urlString = 'https://apps.apple.com/app/id$urlString';
     }
-    
+
     final Uri url = Uri.parse(urlString);
-    
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(24.0),
             child: Column(
@@ -2999,7 +3989,10 @@ class _SisterAppPromotion extends StatelessWidget {
                     Expanded(
                       child: TextButton(
                         onPressed: () => Navigator.of(context).pop(),
-                        child: Text(l10n.cancel, style: const TextStyle(color: Colors.grey)),
+                        child: Text(
+                          l10n.cancel,
+                          style: const TextStyle(color: Colors.grey),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 16),
@@ -3010,7 +4003,9 @@ class _SisterAppPromotion extends StatelessWidget {
                           if (!await launchUrl(url)) {
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(l10n.noData)), // Reuse or add more specific
+                                SnackBar(
+                                  content: Text(l10n.noData),
+                                ), // Reuse or add more specific
                               );
                             }
                           }
@@ -3023,7 +4018,10 @@ class _SisterAppPromotion extends StatelessWidget {
                             borderRadius: BorderRadius.circular(30),
                           ),
                         ),
-                        child: Text(l10n.open, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        child: Text(
+                          l10n.open,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ),
                   ],
@@ -3048,56 +4046,53 @@ class _SisterAppPromotion extends StatelessWidget {
       child: InkWell(
         onTap: () => _launchURL(context),
         borderRadius: BorderRadius.circular(18),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 66),
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: ResponsiveHelper.respPadding(context, 16.0),
-              vertical: 12,
-            ),
-            child: Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(13),
-                  child: Image.asset(
-                    'assets/sougou_icon.png',
-                    width: 42,
-                    height: 42,
-                    fit: BoxFit.cover,
-                  ),
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: ResponsiveHelper.respPadding(context, 16.0),
+            vertical: 12,
+          ),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.asset(
+                  'assets/sougou_icon.png',
+                  width: ResponsiveHelper.respSize(context, 32),
+                  height: ResponsiveHelper.respSize(context, 32),
+                  fit: BoxFit.cover,
                 ),
-                SizedBox(width: ResponsiveHelper.respPadding(context, 10)),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'サクサク過去問',
-                        style: TextStyle(
-                          fontSize: ResponsiveHelper.respFontSize(context, 10),
-                          color: Colors.grey,
-                          fontWeight: FontWeight.bold,
-                        ),
+              ),
+              SizedBox(width: ResponsiveHelper.respPadding(context, 10)),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'サクサク過去問',
+                      style: TextStyle(
+                        fontSize: ResponsiveHelper.respFontSize(context, 10),
+                        color: Colors.grey,
+                        fontWeight: FontWeight.bold,
                       ),
-                      Text(
-                        '過去問・例題ベースの問題集が新登場',
-                        style: TextStyle(
-                          fontSize: ResponsiveHelper.respFontSize(context, 12),
-                          fontWeight: FontWeight.bold,
-                          height: 1.2,
-                        ),
+                    ),
+                    Text(
+                      '過去問・例題ベースの問題集が新登場',
+                      style: TextStyle(
+                        fontSize: ResponsiveHelper.respFontSize(context, 12),
+                        fontWeight: FontWeight.bold,
+                        height: 1.2,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                Icon(
-                  Icons.launch,
-                  color: Colors.grey,
-                  size: ResponsiveHelper.respIconSize(context, 16),
-                ),
-              ],
-            ),
+              ),
+              Icon(
+                Icons.launch,
+                color: Colors.grey,
+                size: ResponsiveHelper.respIconSize(context, 16),
+              ),
+            ],
           ),
         ),
       ),
@@ -3117,6 +4112,7 @@ class ResultPage extends StatefulWidget {
   final List<Quiz> originalQuizzes;
   final String? categoryKey;
   final bool isWeaknessReview;
+  final bool showAnswerExplanation;
 
   const ResultPage({
     super.key,
@@ -3127,6 +4123,7 @@ class ResultPage extends StatefulWidget {
     required this.originalQuizzes,
     this.categoryKey,
     required this.isWeaknessReview,
+    required this.showAnswerExplanation,
   });
 
   @override
@@ -3153,14 +4150,18 @@ class _ResultPageState extends State<ResultPage> {
 
   @override
   void dispose() {
-    _scrollController..removeListener(_handleScroll)..dispose();
+    _scrollController
+      ..removeListener(_handleScroll)
+      ..dispose();
     super.dispose();
   }
 
   Future<void> _loadBookmarks() async {
     final bookmarked = await PrefsHelper.getBookmarkedQuestions();
     if (!mounted) return;
-    setState(() { _bookmarkedQuestions = bookmarked.toSet(); });
+    setState(() {
+      _bookmarkedQuestions = bookmarked.toSet();
+    });
   }
 
   Future<void> _toggleBookmark(Quiz quiz) async {
@@ -3172,8 +4173,10 @@ class _ResultPageState extends State<ResultPage> {
     }
     if (!mounted) return;
     setState(() {
-      if (isBookmarked) _bookmarkedQuestions.remove(quiz.question);
-      else _bookmarkedQuestions.add(quiz.question);
+      if (isBookmarked)
+        _bookmarkedQuestions.remove(quiz.question);
+      else
+        _bookmarkedQuestions.add(quiz.question);
     });
   }
 
@@ -3182,127 +4185,300 @@ class _ResultPageState extends State<ResultPage> {
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.dark,
       child: Scaffold(
-      body: Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [AppColors.backgroundTop, AppColors.backgroundBottom],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ),
-      ),
-      child: SafeArea( // 1. SafeArea内
-        child: Column(
-          children: [
-            // -----------------------------------------------------------------
-            // 1. 上部エリア
-            // -----------------------------------------------------------------
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: SizedBox(height: 60, child: AdBanner(adKey: 'result')),
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [AppColors.backgroundTop, AppColors.backgroundBottom],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
             ),
+          ),
+          child: SafeArea(
+            // 1. SafeArea内
+            child: Column(
+              children: [
+                // -----------------------------------------------------------------
+                // 1. 上部エリア
+                // -----------------------------------------------------------------
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: SizedBox(height: 60, child: AdBanner(adKey: 'result')),
+                ),
 
-            _CollapsingResultSummary(
-              score: widget.score,
-              total: widget.total,
-              message: widget.score == widget.total
-                  ? 'PERFECT! 🎉'
-                  : widget.score / widget.total >= 0.8
+                _CollapsingResultSummary(
+                  score: widget.score,
+                  total: widget.total,
+                  message: widget.score == widget.total
+                      ? 'PERFECT! 🎉'
+                      : widget.score >= 8
                       ? '合格圏内！素晴らしい！'
                       : widget.score / widget.total >= 0.5
-                          ? 'もう少し！頑張ろう！'
-                          : 'まだまだ復習が必要！',
-              collapseProgress: _collapseProgress,
-            ),
+                      ? 'もう少し！頑張ろう！'
+                      : 'まだまだ復習が必要！',
+                  collapseProgress: _collapseProgress,
+                ),
 
-            Expanded(
-              child: ListView.builder(
-                controller: _scrollController,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: widget.history.length,
-                itemBuilder: (context, index) {
-                  final item = widget.history[index];
-                  final Quiz quiz = item['quiz'];
-                  final bool isCorrect = item['result'];
-                  final bool isBookmarked = _bookmarkedQuestions.contains(quiz.question);
+                Expanded(
+                  child: ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: widget.history.length,
+                    itemBuilder: (context, index) {
+                      final item = widget.history[index];
+                      final Quiz quiz = item['quiz'];
+                      final bool isCorrect = item['result'];
+                      final bool isBookmarked = _bookmarkedQuestions.contains(
+                        quiz.question,
+                      );
 
-                  return Center(
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        minWidth: double.infinity,
-                        maxWidth: ResponsiveHelper.respCardWidth(context) ?? double.infinity,
-                      ),
-                      child: SoftSurface(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    borderRadius: BorderRadius.circular(22),
-                    borderColor: AppColors.line.withValues(alpha: 0.78),
-                    fillColor: Colors.white.withValues(alpha: 0.98),
-                    child: Padding(
-                      padding: const EdgeInsets.all(18),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Icon(
-                                isCorrect ? Icons.check_circle_rounded : Icons.cancel_rounded,
-                                color: isCorrect ? AppColors.success : AppColors.error,
-                                size: 28,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      quiz.question,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 16,
-                                        color: AppColors.ink,
-                                        height: 1.42,
+                      return Center(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minWidth: double.infinity,
+                            maxWidth:
+                                ResponsiveHelper.respCardWidth(context) ??
+                                double.infinity,
+                          ),
+                          child: SoftSurface(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            borderRadius: BorderRadius.circular(22),
+                            borderColor: AppColors.line.withValues(alpha: 0.78),
+                            fillColor: Colors.white.withValues(alpha: 0.98),
+                            child: Padding(
+                              padding: const EdgeInsets.all(18),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Icon(
+                                        isCorrect
+                                            ? Icons.check_circle_rounded
+                                            : Icons.cancel_rounded,
+                                        color: isCorrect
+                                            ? AppColors.success
+                                            : AppColors.error,
+                                        size: 28,
                                       ),
-                                    ),
-                                    if (quiz.imagePath != null)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 4),
-                                        child: Row(
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
-                                            Icon(Icons.image_outlined, size: 16, color: Colors.grey[500]),
-                                            const SizedBox(width: 4),
-                                            Text("画像問題", style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+                                            Text(
+                                              quiz.question,
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w800,
+                                                fontSize: 16,
+                                                color: AppColors.ink,
+                                                height: 1.42,
+                                              ),
+                                            ),
+                                            if (quiz.imagePath != null)
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                  top: 4,
+                                                ),
+                                                child: Row(
+                                                  children: [
+                                                    Icon(
+                                                      Icons.image_outlined,
+                                                      size: 16,
+                                                      color: Colors.grey[500],
+                                                    ),
+                                                    const SizedBox(width: 4),
+                                                    Text(
+                                                      "画像問題",
+                                                      style: TextStyle(
+                                                        color: Colors.grey[500],
+                                                        fontSize: 12,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
                                           ],
                                         ),
                                       ),
-                                  ],
-                                ),
+                                      const SizedBox(width: 8),
+                                      IconButton(
+                                        onPressed: () => _toggleBookmark(quiz),
+                                        icon: Icon(
+                                          isBookmarked
+                                              ? Icons.bookmark_rounded
+                                              : Icons.bookmark_border_rounded,
+                                          color: isBookmarked
+                                              ? AppColors.warning
+                                              : AppColors.inkMuted,
+                                        ),
+                                        tooltip: isBookmarked
+                                            ? 'ブックマーク解除'
+                                            : 'ブックマーク',
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.surfaceMuted,
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    child: Text(
+                                      "💡 ${quiz.explanation}",
+                                      style: TextStyle(
+                                        color: AppColors.ink,
+                                        fontSize: ResponsiveHelper.respFontSize(
+                                          context,
+                                          13,
+                                        ),
+                                        height: 1.45,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 8),
-                              IconButton(
-                                onPressed: () => _toggleBookmark(quiz),
-                                icon: Icon(
-                                  isBookmarked ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
-                                  color: isBookmarked ? AppColors.warning : AppColors.inkMuted,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+                // -----------------------------------------------------------------
+                // 3. 下部エリア（固定フッター）
+                // -----------------------------------------------------------------
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  color: AppColors.backgroundBottom.withValues(alpha: 0.6),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minWidth: double.infinity,
+                        maxWidth:
+                            ResponsiveHelper.respCardWidth(context) ??
+                            double.infinity,
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              // 左ボタン: 「ミスを確認」 (全問正解時は非表示)
+                              if (widget.incorrectQuizzes.isNotEmpty) ...[
+                                Expanded(
+                                  child: SizedBox(
+                                    height: 56,
+                                    child: ElevatedButton.icon(
+                                      onPressed: () {
+                                        Navigator.of(context).pushReplacement(
+                                          MaterialPageRoute(
+                                            builder: (context) => QuizPage(
+                                              quizzes: widget.incorrectQuizzes,
+                                              isWeaknessReview: true,
+                                              totalQuestions: widget
+                                                  .incorrectQuizzes
+                                                  .length,
+                                              showAnswerExplanation:
+                                                  widget.showAnswerExplanation,
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                      icon: const Icon(Icons.menu_book_rounded),
+                                      label: const Text("ミスを確認"),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.orange,
+                                        foregroundColor: Colors.white,
+                                        elevation: 0,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            16,
+                                          ),
+                                        ),
+                                        textStyle: const TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                                tooltip: isBookmarked ? 'ブックマーク解除' : 'ブックマーク',
+                                const SizedBox(width: 12),
+                              ],
+
+                              // 右ボタン: 「リトライ」 or 「ホームに戻る」
+                              Expanded(
+                                child: SizedBox(
+                                  height: 56,
+                                  child: ElevatedButton(
+                                    onPressed: () {
+                                      if (widget.isWeaknessReview) {
+                                        Navigator.of(
+                                          context,
+                                        ).popUntil((route) => route.isFirst);
+                                        return;
+                                      }
+
+                                      final shuffledAgain = List<Quiz>.from(
+                                        widget.originalQuizzes,
+                                      )..shuffle();
+                                      Navigator.of(context).pushReplacement(
+                                        MaterialPageRoute(
+                                          builder: (context) => QuizPage(
+                                            quizzes: shuffledAgain,
+                                            categoryKey: widget.categoryKey,
+                                            totalQuestions:
+                                                shuffledAgain.length,
+                                            showAnswerExplanation:
+                                                widget.showAnswerExplanation,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.white,
+                                      foregroundColor: Colors.blueAccent,
+                                      elevation: 0,
+                                      side: const BorderSide(
+                                        color: Colors.blueAccent,
+                                        width: 2,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      textStyle: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      widget.isWeaknessReview
+                                          ? "ホームに戻る"
+                                          : "リトライ",
+                                    ),
+                                  ),
+                                ),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 10),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: AppColors.surfaceMuted,
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Text(
-                              "💡 ${quiz.explanation}",
-                              style: TextStyle(
-                                color: AppColors.ink,
-                                fontSize: ResponsiveHelper.respFontSize(context, 13),
-                                height: 1.45,
-                              ),
+
+                          const SizedBox(height: 12),
+
+                          // ホームに戻るリンク
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(
+                                context,
+                              ).popUntil((route) => route.isFirst);
+                            },
+                            child: const Text(
+                              "ホームに戻る",
+                              style: TextStyle(color: Colors.grey),
                             ),
                           ),
                         ],
@@ -3310,115 +4486,11 @@ class _ResultPageState extends State<ResultPage> {
                     ),
                   ),
                 ),
-              );
-            },
-              ),
+              ],
             ),
-            
-            // -----------------------------------------------------------------
-            // 3. 下部エリア（固定フッター）
-            // -----------------------------------------------------------------
-            Container(
-              padding: const EdgeInsets.all(16),
-              color: AppColors.backgroundBottom.withValues(alpha: 0.6),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minWidth: double.infinity,
-                    maxWidth: ResponsiveHelper.respCardWidth(context) ?? double.infinity,
-                  ),
-                  child: Column(
-                    children: [
-                  Row(
-                    children: [
-                      // 左ボタン: 「ミスを確認」 (全問正解時は非表示)
-                      if (widget.incorrectQuizzes.isNotEmpty) ...[
-                        Expanded(
-                          child: SizedBox(
-                            height: 56,
-                            child: ElevatedButton.icon(
-                              onPressed: () {
-                                Navigator.of(context).pushReplacement(
-                                  MaterialPageRoute(
-                                    builder: (context) => QuizPage(
-                                      quizzes: widget.incorrectQuizzes,
-                                      isWeaknessReview: true,
-                                      totalQuestions: widget.incorrectQuizzes.length,
-                                    ),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.menu_book_rounded),
-                              label: const Text("ミスを確認"),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.orange,
-                                foregroundColor: Colors.white,
-                                elevation: 0,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                      ],
-
-                      // 右ボタン: 「リトライ」 or 「ホームに戻る」
-                      Expanded(
-                        child: SizedBox(
-                          height: 56,
-                          child: ElevatedButton(
-                            onPressed: () {
-                              if (widget.isWeaknessReview) {
-                                Navigator.of(context).popUntil((route) => route.isFirst);
-                                return;
-                              }
-
-                              final shuffledAgain = List<Quiz>.from(widget.originalQuizzes)..shuffle();
-                              Navigator.of(context).pushReplacement(
-                                MaterialPageRoute(
-                                  builder: (context) => QuizPage(
-                                    quizzes: shuffledAgain,
-                                    categoryKey: widget.categoryKey,
-                                    totalQuestions: shuffledAgain.length,
-                                  ),
-                                ),
-                              );
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white,
-                              foregroundColor: Colors.blueAccent,
-                              elevation: 0,
-                              side: const BorderSide(color: Colors.blueAccent, width: 2),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
-                            child: Text(widget.isWeaknessReview ? "ホームに戻る" : "リトライ"),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 12),
-                  
-                  // ホームに戻るリンク
-                  TextButton(
-                    onPressed: () {
-                      Navigator.of(context).popUntil((route) => route.isFirst);
-                    },
-                    child: const Text("ホームに戻る", style: TextStyle(color: Colors.grey)),
-                  ),
-                ],
-              ),
-             ),
-            ),
-           ),
-          ],
-        ),
+          ),
+        ), // Container (gradient)
       ),
-      ),  // Container (gradient)
-    ),
-  );
-}
+    );
+  }
 }

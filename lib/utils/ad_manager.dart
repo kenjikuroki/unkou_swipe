@@ -39,12 +39,12 @@ class AdManager {
 
   // =============== 【テストと本番の切り替え】 ===============
   // テスト用（クローズドテストなど）
-  String get adUnitId => _testBannerAdUnitId; 
-  String get interstitialAdUnitId => _testInterstitialAdUnitId;
+  // String get adUnitId => _testBannerAdUnitId; 
+  // String get interstitialAdUnitId => _testInterstitialAdUnitId;
   
   // 本番用（公開リリース時）
-  // String get adUnitId => _adUnitId; 
-  // String get interstitialAdUnitId => _interstitialAdUnitId;
+  String get adUnitId => _adUnitId; 
+  String get interstitialAdUnitId => _interstitialAdUnitId;
   // ========================================================
 
   void setAdUnitIds({required String bannerId, required String interstitialId}) {
